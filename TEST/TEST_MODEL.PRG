@@ -84,7 +84,7 @@ BEGIN
 
         // rotar todas las submallas (pitch/yaw en radianes)
         FOR (i = 0; i < nsub; i = i + 1)
-            g3d_entity_set_rotation(parts[i], pitch * 0.01745, yaw * 0.01745, 0.0);
+            g3d_entity_set_rotation(parts[i], pitch * 1000, yaw * 1000, 0.0);
         END
 
         // imprimir el angulo cada ~20 frames

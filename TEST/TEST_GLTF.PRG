@@ -105,7 +105,7 @@ BEGIN
     LOOP
         ang = ang + 0.01;
         FOR (i = 0; i < nparts; i = i + 1)
-            g3d_entity_set_rotation(parts[i], 0.0, ang, 0.0);
+            g3d_entity_set_rotation(parts[i], 0.0, ang * 57295.78, 0.0);
         END
 
         gid = g3d_render(gid);

@@ -122,7 +122,7 @@ BEGIN
         py = g3d_terrain_get_height(terrain_mesh, px, pz) + 1.0;
         spin = spin + 0.04;
         g3d_entity_set_position(player, px, py, pz);
-        g3d_entity_set_rotation(player, 0.0, spin, 0.0);
+        g3d_entity_set_rotation(player, 0.0, spin * 57295.78, 0.0);
 
         // Camara en tercera persona siguiendo al cubo
         g3d_camera_set_position(camera, px, py + 14.0, pz - 20.0);

@@ -58,7 +58,7 @@ BEGIN
         g3d_entity_set_material(ent, mat);
         g3d_entity_set_scale(ent, s, s, s);
         g3d_entity_set_position(ent, px, py, pz);
-        g3d_entity_set_rotation(ent, 0.0, roty * 0.01745, 0.0);
+        g3d_entity_set_rotation(ent, 0.0, roty * 1000, 0.0);
     END
 END
 

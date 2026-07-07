@@ -95,7 +95,7 @@ BEGIN
     LOOP
         // Rotacion suave (angulos en RADIANES): ~0.6 deg pitch, ~1.1 deg yaw por frame
         ang += 0.02;
-        g3d_entity_set_rotation(entity, ang * 0.5, ang, 0.0);
+        g3d_entity_set_rotation(entity, ang * 0.5 * 57295.78, ang * 57295.78, 0.0);
 
         // Renderiza la escena 3D dentro de un GRAPH y lo muestra
         gid = g3d_render(gid);

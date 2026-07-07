@@ -256,7 +256,7 @@ BEGIN
         // Colocar a Crash
         FOR (i = 0; i < nsub; i = i + 1)
             g3d_entity_set_position(parts[i], px, py, pz);
-            g3d_entity_set_rotation(parts[i], 0.0, facing * 0.01745, 0.0);
+            g3d_entity_set_rotation(parts[i], 0.0, facing * 1000, 0.0);
         END
 
         // Camara 3a persona detras de Crash

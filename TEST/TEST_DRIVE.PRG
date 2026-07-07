@@ -70,7 +70,7 @@ BEGIN
     g3d_vehicle_set_tuning(veh, 30.0, 60.0, 34.0, 45.0, 0.7);
     g3d_physics_set_gravity(30.0);
 
-    // Si el buggy conduce de lado/atras, ajusta este offset (0, PI/2, PI, -PI/2)
+    // Si el buggy conduce de lado/atras, ajusta este offset (0, 90000, 180000, -90000)
     yawoff = 0.0;
     cdist = 20.0; chh = 9.0; dt = 1.0 / 60.0;
 
@@ -113,8 +113,8 @@ BEGIN
         kn = key(_N);
 
         // camara de persecucion detras del buggy (suavizada)
-        cfx = sin(vyaw * 57296);      // yaw en radianes -> mili-grados: rad*180/pi*1000
-        cfz = cos(vyaw * 57296);
+        cfx = sin(vyaw);      // yaw en radianes -> mili-grados: rad*180/pi*1000
+        cfz = cos(vyaw);
         tcx = vx - cfx * cdist; tcy = vy + chh; tcz = vz - cfz * cdist;
         camx = camx + (tcx - camx) * ksm;
         camy = camy + (tcy - camy) * ksm;

@@ -48,7 +48,7 @@ BEGIN
     g3d_entity_set_material(m, mtn_mat);
     g3d_entity_set_scale(m, sc, sc, sc);
     g3d_entity_set_position(m, px, -1.0, pz);
-    g3d_entity_set_rotation(m, 0.0, yawr, 0.0);
+    g3d_entity_set_rotation(m, 0.0, yawr * 57295.78, 0.0);
 END
 
 // Carga un modelo glTF, lo orienta (pitch), escala a target_h y lo planta en (px,pz)
@@ -197,7 +197,7 @@ BEGIN
         // Mario y Luigi giran lentamente sobre si mismos
         spin_yaw = spin_yaw + 0.01;
         FOR (i = 0; i < spin_n; i = i + 1)
-            g3d_entity_set_rotation(spin[i], 0.0, spin_yaw, 0.0);
+            g3d_entity_set_rotation(spin[i], 0.0, spin_yaw * 57295.78, 0.0);
         END
 
         gid = g3d_render(gid);

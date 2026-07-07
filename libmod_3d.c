@@ -163,11 +163,16 @@ int64_t g3d_entity_set_position_bgd(INSTANCE *my, int64_t *params) {
     return g3d_entity_impl_set_position(entity_id, x, y, z);
 }
 
+/* BGD angles use BennuGD's unit (thousandths of a degree, like sin/cos/angle);
+   the C core uses radians. Convert only at this boundary. */
+#define G3D_MD2RAD(md) ((float)((md) * 0.00001745329252))
+#define G3D_RAD2MD(r)  ((float)((r) * 57295.7795131))
+
 int64_t g3d_entity_set_rotation_bgd(INSTANCE *my, int64_t *params) {
     int entity_id = (int)params[0];
-    float pitch = *(float *)&params[1];
-    float yaw = *(float *)&params[2];
-    float roll = *(float *)&params[3];
+    float pitch = G3D_MD2RAD(*(float *)&params[1]);
+    float yaw   = G3D_MD2RAD(*(float *)&params[2]);
+    float roll  = G3D_MD2RAD(*(float *)&params[3]);
     return g3d_entity_impl_set_rotation(entity_id, pitch, yaw, roll);
 }
 
@@ -499,6 +504,14 @@ int64_t g3d_model_animate_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_model_animate_blend_bgd(INSTANCE *my, int64_t *params) {
+    G3DModel *model = (G3DModel *)(intptr_t)params[0];
+    g3d_model_animate_blend(model, (int)params[1], *(float *)&params[2],
+                            (int)params[3], *(float *)&params[4],
+                            *(float *)&params[5], (int)params[6]);
+    return 1;
+}
+
 int64_t g3d_model_rest_pose_bgd(INSTANCE *my, int64_t *params) {
     G3DModel *model = (G3DModel *)(intptr_t)params[0];
     g3d_model_rest_pose(model);
@@ -669,7 +682,7 @@ int64_t g3d_model_spawn_bgd(INSTANCE *my, int64_t *params) {
     int scene_id = (int)params[0];
     void *model = (void *)(intptr_t)params[1];
     return g3d_model_spawn(scene_id, model, *(float *)&params[2], *(float *)&params[3],
-                           *(float *)&params[4], *(float *)&params[5], *(float *)&params[6]);
+                           *(float *)&params[4], *(float *)&params[5], G3D_MD2RAD(*(float *)&params[6]));
 }
 
 int64_t g3d_model_load_md3_bgd(INSTANCE *my, int64_t *params) {
@@ -1482,7 +1495,7 @@ int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params) { g3d_collider_cle
 /* ---- raycast vehicle ---- */
 int64_t g3d_vehicle_create_bgd(INSTANCE *my, int64_t *params) {
     return g3d_vehicle_create(*(float *)&params[0], *(float *)&params[1],
-                              *(float *)&params[2], *(float *)&params[3]);
+                              *(float *)&params[2], G3D_MD2RAD(*(float *)&params[3]));
 }
 int64_t g3d_vehicle_destroy_bgd(INSTANCE *my, int64_t *params) { g3d_vehicle_destroy((int)params[0]); return 1; }
 int64_t g3d_vehicle_update_bgd(INSTANCE *my, int64_t *params) {
@@ -1502,9 +1515,9 @@ int64_t g3d_vehicle_set_tuning_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_vehicle_x_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_x((int)params[0]); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_y_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_y((int)params[0]); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_z_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_z((int)params[0]); return (int64_t) * (int32_t *)&v; }
-int64_t g3d_vehicle_yaw_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_yaw((int)params[0]); return (int64_t) * (int32_t *)&v; }
-int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_pitch((int)params[0]); return (int64_t) * (int32_t *)&v; }
-int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_roll((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_vehicle_yaw_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_yaw((int)params[0])); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_pitch((int)params[0])); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_roll((int)params[0])); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_speed_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_speed((int)params[0]); return (int64_t) * (int32_t *)&v; }
 
 void __bgdexport(libmod_3d, module_initialize)() {}

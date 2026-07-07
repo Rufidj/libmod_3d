@@ -158,45 +158,78 @@ void g3d_model_rest_pose(G3DModel *model) {
     apply_pose(model);
 }
 
+/* Sample one animation at `time` into the given local-TRS arrays (starting from
+   the model's base pose for nodes the animation doesn't touch). */
+static void sample_pose(G3DModel *model, int anim, float time, int loop,
+                        Vec3 *T, Quat *R, Vec3 *S) {
+    for (int n = 0; n < model->node_count; n++) {
+        T[n] = model->node_base_t[n];
+        R[n] = model->node_base_r[n];
+        S[n] = model->node_base_s[n];
+    }
+    if (anim < 0 || anim >= model->animation_count)
+        return;
+
+    G3DAnimation *A = &model->animations[anim];
+    float t = time;
+    if (A->duration > 1e-6f) {
+        if (loop)            t = fmodf(time, A->duration);
+        else if (t > A->duration) t = A->duration;
+    }
+    if (t < 0.0f) t = 0.0f;
+
+    for (int c = 0; c < A->channel_count; c++) {
+        G3DAnimChannel *ch = &A->channels[c];
+        if (ch->node < 0 || ch->node >= model->node_count)
+            continue;
+        float val[4];
+        sample_channel(ch, t, val);
+        if (ch->path == 0)      T[ch->node] = vec3_make(val[0], val[1], val[2]);
+        else if (ch->path == 1) R[ch->node] = quat_make(val[0], val[1], val[2], val[3]);
+        else if (ch->path == 2) S[ch->node] = vec3_make(val[0], val[1], val[2]);
+    }
+}
+
 void g3d_model_animate(G3DModel *model, int anim, float time, int loop) {
     if (!model || !model->skinned)
         return;
 
-    /* reset to base local TRS */
-    for (int n = 0; n < model->node_count; n++) {
-        model->node_cur_t[n] = model->node_base_t[n];
-        model->node_cur_r[n] = model->node_base_r[n];
-        model->node_cur_s[n] = model->node_base_s[n];
-    }
-
-    if (anim >= 0 && anim < model->animation_count) {
-        G3DAnimation *A = &model->animations[anim];
-        float t = time;
-        if (A->duration > 1e-6f) {
-            if (loop)
-                t = fmodf(time, A->duration);
-            else if (t > A->duration)
-                t = A->duration;
-        }
-        if (t < 0.0f) t = 0.0f;
-
-        for (int c = 0; c < A->channel_count; c++) {
-            G3DAnimChannel *ch = &A->channels[c];
-            if (ch->node < 0 || ch->node >= model->node_count)
-                continue;
-            float val[4];
-            sample_channel(ch, t, val);
-            if (ch->path == 0)
-                model->node_cur_t[ch->node] = vec3_make(val[0], val[1], val[2]);
-            else if (ch->path == 1)
-                model->node_cur_r[ch->node] = quat_make(val[0], val[1], val[2], val[3]);
-            else if (ch->path == 2)
-                model->node_cur_s[ch->node] = vec3_make(val[0], val[1], val[2]);
-        }
-    }
+    sample_pose(model, anim, time, loop,
+                model->node_cur_t, model->node_cur_r, model->node_cur_s);
 
     /* Strip root motion: keep the skeleton root translation at its base so the
        character animates in place instead of wandering off-screen. */
+    if (model->lock_root && model->root_node >= 0)
+        model->node_cur_t[model->root_node] = model->node_base_t[model->root_node];
+
+    apply_pose(model);
+}
+
+/* Cross-fade two animations: weight 0 = a0 only, 1 = a1 only. Blends per node
+   (lerp translation/scale, slerp rotation). Great for idle<->walk<->run. */
+void g3d_model_animate_blend(G3DModel *model, int a0, float t0,
+                             int a1, float t1, float weight, int loop) {
+    if (!model || !model->skinned)
+        return;
+    if (weight <= 0.001f) { g3d_model_animate(model, a0, t0, loop); return; }
+    if (weight >= 0.999f) { g3d_model_animate(model, a1, t1, loop); return; }
+
+    int nc = model->node_count;
+    Vec3 *Tb = (Vec3 *)malloc(sizeof(Vec3) * nc);
+    Quat *Rb = (Quat *)malloc(sizeof(Quat) * nc);
+    Vec3 *Sb = (Vec3 *)malloc(sizeof(Vec3) * nc);
+    if (!Tb || !Rb || !Sb) { free(Tb); free(Rb); free(Sb); return; }
+
+    /* pose A into node_cur, pose B into the temp arrays, then blend */
+    sample_pose(model, a0, t0, loop, model->node_cur_t, model->node_cur_r, model->node_cur_s);
+    sample_pose(model, a1, t1, loop, Tb, Rb, Sb);
+    for (int n = 0; n < nc; n++) {
+        model->node_cur_t[n] = vec3_lerp(model->node_cur_t[n], Tb[n], weight);
+        model->node_cur_s[n] = vec3_lerp(model->node_cur_s[n], Sb[n], weight);
+        model->node_cur_r[n] = quat_slerp(model->node_cur_r[n], Rb[n], weight);
+    }
+    free(Tb); free(Rb); free(Sb);
+
     if (model->lock_root && model->root_node >= 0)
         model->node_cur_t[model->root_node] = model->node_base_t[model->root_node];
 

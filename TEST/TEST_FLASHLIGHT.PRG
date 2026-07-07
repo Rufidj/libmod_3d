@@ -244,13 +244,13 @@ BEGIN
         // Colocar el modelo de la linterna en la mano, orientado con la vista
         FOR (i = 0; i < vm_n; i = i + 1)
             g3d_entity_set_position(vm[i], hx, hy, hz);
-            g3d_entity_set_rotation(vm[i], pitch*0.01745, yaw*0.01745, 0.0);
+            g3d_entity_set_rotation(vm[i], pitch*1000, yaw*1000, 0.0);
         END
 
         // Modelos girando despacio
         spin_yaw = spin_yaw + 0.01;
         FOR (i = 0; i < spin_n; i = i + 1)
-            g3d_entity_set_rotation(spin[i], 0.0, spin_yaw, 0.0);
+            g3d_entity_set_rotation(spin[i], 0.0, spin_yaw * 57295.78, 0.0);
         END
 
         g3d_camera_set_position(camera, cx, cy, cz);

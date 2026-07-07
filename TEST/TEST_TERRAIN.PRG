@@ -85,7 +85,7 @@ BEGIN
     LOOP
         // Rotar el terreno lentamente para apreciarlo (radianes)
         ang += 0.008;
-        g3d_entity_set_rotation(entity, 0.0, ang, 0.0);
+        g3d_entity_set_rotation(entity, 0.0, ang * 57295.78, 0.0);
 
         gid = g3d_render(gid);
         graph = gid;
