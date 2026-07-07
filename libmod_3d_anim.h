@@ -1,0 +1,36 @@
+/*
+ * libmod_3d_anim.h - Skeletal animation playback (glTF), CPU skinning
+ */
+
+#ifndef __LIBMOD_3D_ANIM_H
+#define __LIBMOD_3D_ANIM_H
+
+#include "libmod_3d_mesh.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Number of animations the model carries. */
+int g3d_model_animation_count(G3DModel *model);
+
+/* Duration (seconds) of an animation, or 0. */
+float g3d_model_animation_duration(G3DModel *model, int anim);
+
+/* Evaluate animation `anim` at `time` seconds (loop wraps it to the duration),
+   recompute the joint matrices and re-skin every skinned mesh on the GPU. A
+   no-op for models without a skin. */
+void g3d_model_animate(G3DModel *model, int anim, float time, int loop);
+
+/* Restore the bind pose (skin all meshes with identity joints). */
+void g3d_model_rest_pose(G3DModel *model);
+
+/* Root-motion lock: 1 (default) keeps the character in place, 0 lets the root
+   bone translate (e.g. a walk cycle that moves forward). */
+void g3d_model_set_lock_root(G3DModel *model, int enable);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __LIBMOD_3D_ANIM_H */

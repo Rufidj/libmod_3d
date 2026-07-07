@@ -1,0 +1,24 @@
+# Build artifacts
+build/
+*.o
+*.so
+*.a
+*.obj
+
+# Compiled BennuGD bytecode (regenerable from the .PRG sources)
+*.dcb
+
+# Binary assets (models/textures) are kept out of the source repo
+assets/
+TEST/assets/
+
+# Packaged archives / exports
+*.zip
+TEST/TEST DRIVE/
+
+# Editor / OS cruft
+.vscode/
+.DS_Store
+
+# Large binary demo data (voxel volumes)
+*.g3dv

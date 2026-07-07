@@ -1,0 +1,13 @@
+SCENE editor
+HEIGHTMAP /home/ruben/BennuGD2/modules/libmod_3d/TEST/demo_height.g3dh /home/ruben/BennuGD2/modules/libmod_3d/TEST/demo_terrain.png
+VOXTERRAIN /home/ruben/BennuGD2/modules/libmod_3d/TEST/demo_terrain.g3dv _
+VOXSPRING -2.30631 -4.07664 -22.4078 4
+SKY_GRADIENT 0.30 0.50 0.85 0.80 0.88 0.96
+AMBIENT 0.5 0.52 0.55 1.0
+SHADOWS 1
+LIGHT 0 1 1 0.95 1.2 -0.4 -0.8 -0.35 0 0 0 0 0
+PLAYER 1 5 1.5
+MODEL assets/barrel.glb -13.4304 -0.963541 -0.16074 -83.5 -8 0 2 2 2
+MODEL assets/barrel.glb -14.6657 1.40065 28.9915 0 0 0 2 2 2
+MODEL assets/barrel.glb -45.5208 1.12113 21.2291 0 0 0 2 2 2
+MODEL assets/barrel.glb -7.6425 2.32173 -40.5251 0 0 0 2 2 2

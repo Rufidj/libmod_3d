@@ -1,0 +1,8 @@
+PREFAB habitacion
+BOX 0 0.2 0 20 0.4 20 0 0 0 0.4 0.32 0.26 0 _
+BOX 0 3.2 -10 20 6 0.5 0 0 0 0.62 0.6 0.64 1 assets/terrain.png
+BOX -10 3.2 0 0.5 6 20 0 0 0 0.62 0.6 0.64 1 assets/terrain.png
+BOX 10 3.2 0 0.5 6 20 0 0 0 0.62 0.6 0.64 1 assets/terrain.png
+BOX -6.5 3.2 10 7 6 0.5 0 0 0 0.62 0.6 0.64 1 assets/terrain.png
+BOX 6.5 3.2 10 7 6 0.5 0 0 0 0.62 0.6 0.64 1 assets/terrain.png
+END

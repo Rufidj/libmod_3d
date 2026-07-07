@@ -1,0 +1,91 @@
+/*
+ * libmod_3d_physics.h - collision + character controller
+ *
+ * A lightweight kinematic physics layer for the 3D engine:
+ *   - capsule character controllers that walk/jump on the terrain heightmap
+ *     (or voxel surface), slide off steep slopes and step over small ledges.
+ *   - axis-aligned box colliders (walls, crates, obstacles) resolved with
+ *     collide-and-slide so characters can't pass through them.
+ *
+ * Ground height comes from g3d_scene_terrain_height(); no BennuGD2 runtime is
+ * touched - this all lives inside libmod_3d.
+ */
+#ifndef __LIBMOD_3D_PHYSICS_H
+#define __LIBMOD_3D_PHYSICS_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ---- character controllers (capsule) ---- */
+
+/* Create a capsule character. (x,y,z) = feet position, radius/height = capsule.
+   Returns a handle >= 0, or -1 if full. */
+int  g3d_char_create(float x, float y, float z, float radius, float height);
+void g3d_char_destroy(int id);
+void g3d_char_clear_all(void);
+
+/* Desired horizontal velocity this frame (world units/sec). Call every frame
+   from input; ignored components decay when airborne. */
+void g3d_char_move(int id, float vx, float vz);
+
+/* Jump: if grounded, launch upward at `speed` units/sec. */
+void g3d_char_jump(int id, float speed);
+
+/* Advance one step: gravity + integrate + collide against terrain and boxes. */
+void g3d_char_update(int id, float dt);
+
+/* Teleport (also zeroes velocity). */
+void g3d_char_set_position(int id, float x, float y, float z);
+
+/* State read-back (feet position). Eye height = feet + height. */
+float g3d_char_x(int id);
+float g3d_char_y(int id);
+float g3d_char_z(int id);
+int   g3d_char_grounded(int id);
+
+/* Tunables (per character). step = max ledge to climb; slope_deg = max walkable
+   angle before sliding. */
+void g3d_char_set_tuning(int id, float step, float slope_deg);
+
+/* Global gravity (units/sec^2, positive = downward). Default 24. */
+void g3d_physics_set_gravity(float g);
+
+/* ---- static box colliders (AABB) ---- */
+
+int  g3d_collider_add_box(float minx, float miny, float minz,
+                          float maxx, float maxy, float maxz);
+void g3d_collider_clear(void);
+
+/* ---- raycast vehicle (arcade) ---- */
+
+/* Create a vehicle at (x,y,z) facing heading (radians). Returns handle or -1. */
+int  g3d_vehicle_create(float x, float y, float z, float heading);
+void g3d_vehicle_destroy(int id);
+
+/* Advance one step. throttle -1..1 (reverse..forward), steer -1..1, brake 0..1. */
+void g3d_vehicle_update(int id, float dt, float throttle, float steer, float brake);
+
+/* Chassis geometry (wheelbase = front-rear, track = left-right, ride = height
+   of the body above the ground). */
+void g3d_vehicle_set_geometry(int id, float wheelbase, float track, float ride);
+
+/* Handling: engine accel, top speed, grip-based steer (max steer degrees),
+   braking force, drag. Any <=0 keeps the current value. */
+void g3d_vehicle_set_tuning(int id, float engine, float top_speed,
+                            float max_steer_deg, float brake_force, float drag);
+
+/* State read-back. yaw/pitch/roll in radians (feed to g3d_entity_set_rotation). */
+float g3d_vehicle_x(int id);
+float g3d_vehicle_y(int id);
+float g3d_vehicle_z(int id);
+float g3d_vehicle_yaw(int id);
+float g3d_vehicle_pitch(int id);
+float g3d_vehicle_roll(int id);
+float g3d_vehicle_speed(int id);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __LIBMOD_3D_PHYSICS_H */
