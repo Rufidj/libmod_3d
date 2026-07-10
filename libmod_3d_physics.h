@@ -83,6 +83,25 @@ float g3d_vehicle_yaw(int id);
 float g3d_vehicle_pitch(int id);
 float g3d_vehicle_roll(int id);
 float g3d_vehicle_speed(int id);
+/* ---- rigid bodies (AABB boxes: fall, stack, collide, get pushed) ----
+   Share the same static box colliders, terrain and gravity as the rest. Step
+   the whole world once per frame with g3d_rigidbody_step(dt); each body is a
+   handle the game reads back (BennuGD idiom: one process per body). */
+
+int  g3d_rigidbody_create(float x, float y, float z,
+                          float hx, float hy, float hz, float mass);  /* mass<=0 = static */
+void g3d_rigidbody_destroy(int id);
+void g3d_rigidbody_clear(void);
+void g3d_rigidbody_step(float dt);                    /* advance the whole world */
+
+void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz);
+void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz);
+void g3d_rigidbody_set_bounce(int id, float restitution, float friction);
+
+float g3d_rigidbody_x(int id);
+float g3d_rigidbody_y(int id);
+float g3d_rigidbody_z(int id);
+int   g3d_rigidbody_grounded(int id);
 
 #ifdef __cplusplus
 }

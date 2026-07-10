@@ -1576,6 +1576,32 @@ int64_t g3d_vehicle_yaw_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2M
 int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_pitch((int)params[0])); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_roll((int)params[0])); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_speed_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_speed((int)params[0]); return (int64_t) * (int32_t *)&v; }
+/* ---- rigid bodies ---- */
+int64_t g3d_rigidbody_create_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
+                                *(float *)&params[6]);
+}
+int64_t g3d_rigidbody_destroy_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_destroy((int)params[0]); return 1; }
+int64_t g3d_rigidbody_clear_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_clear(); return 1; }
+int64_t g3d_rigidbody_step_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_step(*(float *)&params[0]); return 1; }
+int64_t g3d_rigidbody_apply_impulse_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_apply_impulse((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_velocity_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_velocity((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_bounce_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_bounce((int)params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+int64_t g3d_rigidbody_x_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_x((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_y_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_y((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_z_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_z((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_grounded_bgd(INSTANCE *my, int64_t *params) { return g3d_rigidbody_grounded((int)params[0]); }
+
 
 static int g3d_object_info(void *what, REGION *clip, int64_t *key, int64_t *ready) {
     *key = INT64_MAX; /* Highest Z -> draws first / at the bottom */

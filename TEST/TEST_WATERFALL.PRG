@@ -37,10 +37,6 @@ BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
 
-    IF (!g3d_init(960, 540))
-        say("ERROR: 3D init failed");
-        RETURN;
-    END
 
     scene = g3d_scene_create("Waterfall");
     g3d_scene_set_active(scene);

@@ -367,3 +367,169 @@ void g3d_char_update(int id, float dt) {
         c->grounded = 0;
     }
 }
+
+/* ========================================================================= */
+/*  rigid bodies (AABB boxes: fall, stack, collide, get pushed)               */
+/*  Reuses the same static box colliders (g_boxes), terrain and gravity.      */
+/* ========================================================================= */
+
+#define MAX_BODIES 256
+
+typedef struct {
+    float px, py, pz;        /* centre                                         */
+    float vx, vy, vz;
+    float hx, hy, hz;        /* half-extents (AABB, no rotation in this MVP)   */
+    float inv_mass;          /* 0 = static / immovable                         */
+    float restitution;       /* bounciness 0..1                                */
+    float friction;          /* ground/contact damping 0..1                    */
+    int   grounded;
+    int   active;
+} G3DBody;
+
+static G3DBody g_bodies[MAX_BODIES];
+
+int g3d_rigidbody_create(float x, float y, float z,
+                         float hx, float hy, float hz, float mass) {
+    for (int i = 0; i < MAX_BODIES; i++) {
+        if (g_bodies[i].active) continue;
+        G3DBody *b = &g_bodies[i];
+        memset(b, 0, sizeof(*b));
+        b->px = x; b->py = y; b->pz = z;
+        b->hx = hx > 0.01f ? hx : 0.5f;
+        b->hy = hy > 0.01f ? hy : 0.5f;
+        b->hz = hz > 0.01f ? hz : 0.5f;
+        b->inv_mass = mass > 0.0f ? 1.0f / mass : 0.0f;
+        b->restitution = 0.12f;
+        b->friction = 0.55f;
+        b->active = 1;
+        return i;
+    }
+    return -1;
+}
+void g3d_rigidbody_destroy(int id) { if (id>=0 && id<MAX_BODIES) g_bodies[id].active = 0; }
+void g3d_rigidbody_clear(void) { for (int i=0;i<MAX_BODIES;i++) g_bodies[i].active = 0; }
+
+void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    G3DBody *b = &g_bodies[id];
+    b->vx += ix * b->inv_mass; b->vy += iy * b->inv_mass; b->vz += iz * b->inv_mass;
+    if (iy > 0.0f) b->grounded = 0;
+}
+void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    g_bodies[id].vx = vx; g_bodies[id].vy = vy; g_bodies[id].vz = vz;
+}
+void g3d_rigidbody_set_bounce(int id, float restitution, float friction) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    if (restitution >= 0.0f) g_bodies[id].restitution = restitution > 1.0f ? 1.0f : restitution;
+    if (friction >= 0.0f)    g_bodies[id].friction = friction > 1.0f ? 1.0f : friction;
+}
+
+float g3d_rigidbody_x(int id) { return (id>=0&&id<MAX_BODIES&&g_bodies[id].active)?g_bodies[id].px:0.0f; }
+float g3d_rigidbody_y(int id) { return (id>=0&&id<MAX_BODIES&&g_bodies[id].active)?g_bodies[id].py:0.0f; }
+float g3d_rigidbody_z(int id) { return (id>=0&&id<MAX_BODIES&&g_bodies[id].active)?g_bodies[id].pz:0.0f; }
+int   g3d_rigidbody_grounded(int id) { return (id>=0&&id<MAX_BODIES&&g_bodies[id].active)?g_bodies[id].grounded:0; }
+
+/* Separate body `a` from an AABB [mn,mx] along the axis of least penetration.
+   `share` = how much of the push a takes (1 vs a static box, inv-mass split vs
+   another body). Returns the axis pushed (0/1/2) or -1 if no overlap. */
+static int mtv_resolve(G3DBody *a, const float *mn, const float *mx,
+                       float shareA, G3DBody *b, float shareB) {
+    float amn[3] = { a->px-a->hx, a->py-a->hy, a->pz-a->hz };
+    float amx[3] = { a->px+a->hx, a->py+a->hy, a->pz+a->hz };
+    float ov[3];
+    for (int k = 0; k < 3; k++) {
+        float lo = amn[k] > mn[k] ? amn[k] : mn[k];
+        float hi = amx[k] < mx[k] ? amx[k] : mx[k];
+        ov[k] = hi - lo;
+        if (ov[k] <= 0.0f) return -1;                 /* separated on this axis */
+    }
+    int axis = 0;                                     /* least-penetration axis */
+    if (ov[1] < ov[axis]) axis = 1;
+    if (ov[2] < ov[axis]) axis = 2;
+    float acen = (axis==0)?a->px:(axis==1)?a->py:a->pz;
+    float bcen = (mn[axis] + mx[axis]) * 0.5f;
+    float sign = (acen < bcen) ? -1.0f : 1.0f;        /* push a away from b */
+    float push = ov[axis];
+
+    float da = sign * push * shareA;
+    if (axis==0) a->px += da; else if (axis==1) a->py += da; else a->pz += da;
+    if (b) { float db = -sign * push * shareB;
+             if (axis==0) b->px += db; else if (axis==1) b->py += db; else b->pz += db; }
+    return axis;
+}
+
+/* Bounce/kill the velocity component along the contact axis + tangential friction. */
+static void response_axis(G3DBody *a, int axis, float rest, float fric) {
+    float *va = (axis==0)?&a->vx:(axis==1)?&a->vy:&a->vz;
+    if (*va != 0.0f) *va = -(*va) * rest;             /* reflect along normal */
+    /* tangential friction */
+    if (axis != 0) a->vx *= (1.0f - fric);
+    if (axis != 1) a->vy *= (1.0f - fric);
+    if (axis != 2) a->vz *= (1.0f - fric);
+    if (axis == 1 && a->py >= 0.0f) a->grounded = 1;
+}
+
+void g3d_rigidbody_step(float dt) {
+    if (dt <= 0.0f) return; if (dt > 0.05f) dt = 0.05f;
+
+    /* integrate */
+    for (int i = 0; i < MAX_BODIES; i++) {
+        G3DBody *b = &g_bodies[i];
+        if (!b->active || b->inv_mass == 0.0f) continue;
+        b->vy -= g_gravity * dt;
+        b->px += b->vx * dt; b->py += b->vy * dt; b->pz += b->vz * dt;
+        b->grounded = 0;
+    }
+
+    /* solve contacts (a few relaxation iterations for stable stacking) */
+    for (int it = 0; it < 4; it++) {
+        for (int i = 0; i < MAX_BODIES; i++) {
+            G3DBody *b = &g_bodies[i];
+            if (!b->active || b->inv_mass == 0.0f) continue;
+
+            /* vs terrain (ground under the box centre) */
+            float g = g3d_scene_terrain_height(b->px, b->pz);
+            if (b->py - b->hy < g) {
+                b->py = g + b->hy;
+                if (b->vy < 0.0f) b->vy = -b->vy * b->restitution;
+                if (fabsf(b->vy) < 0.6f) b->vy = 0.0f;
+                float f = b->friction * dt * 8.0f; if (f > 0.9f) f = 0.9f;
+                b->vx *= (1.0f - f); b->vz *= (1.0f - f);   /* ground friction */
+                b->grounded = 1;
+            }
+
+            /* vs static box colliders (walls, platforms) */
+            for (int k = 0; k < MAX_BOXES; k++) {
+                if (!g_boxes[k].active) continue;
+                int ax = mtv_resolve(b, g_boxes[k].mn, g_boxes[k].mx, 1.0f, NULL, 0.0f);
+                if (ax >= 0) response_axis(b, ax, b->restitution, b->friction * 0.5f);
+            }
+
+            /* vs other dynamic bodies */
+            for (int j = i + 1; j < MAX_BODIES; j++) {
+                G3DBody *o = &g_bodies[j];
+                if (!o->active) continue;
+                float imsum = b->inv_mass + o->inv_mass;
+                if (imsum == 0.0f) continue;
+                float omn[3] = { o->px-o->hx, o->py-o->hy, o->pz-o->hz };
+                float omx[3] = { o->px+o->hx, o->py+o->hy, o->pz+o->hz };
+                float sa = b->inv_mass / imsum, sb = o->inv_mass / imsum;
+                int ax = mtv_resolve(b, omn, omx, sa, o, sb);
+                if (ax >= 0) {
+                    /* exchange velocity along the contact axis (equal-ish) */
+                    float *vb = (ax==0)?&b->vx:(ax==1)?&b->vy:&b->vz;
+                    float *vo = (ax==0)?&o->vx:(ax==1)?&o->vy:&o->vz;
+                    float rest = (b->restitution + o->restitution) * 0.5f;
+                    float rel = *vb - *vo;
+                    if ((*vb - *vo) * ((ax==0?(b->px-o->px):ax==1?(b->py-o->py):(b->pz-o->pz))) < 0.0f) {
+                        float imp = -(1.0f + rest) * rel / imsum;
+                        *vb += imp * b->inv_mass;
+                        *vo -= imp * o->inv_mass;
+                    }
+                    if (ax == 1) { if (b->py > o->py) b->grounded = 1; else o->grounded = 1; }
+                }
+            }
+        }
+    }
+}

@@ -61,7 +61,6 @@ else()
         ../../core/bgdrtm
         ../../modules/libbggfx
         ../../modules/libsdlhandler
-        ../../modules/libmod_ray
         ../../vendor/sdl-gpu/include
         ${INCLUDE_DIRECTORIES}
     )

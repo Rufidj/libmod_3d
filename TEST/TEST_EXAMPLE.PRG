@@ -9,7 +9,7 @@ import "libmod_3d";
 
 GLOBAL
     int scene;
-    int entity;
+    int ent;
     int material;
     int cube_mesh;
     int texture;
@@ -64,10 +64,10 @@ BEGIN
     say("OK: Material created: " + itoa(material));
 
     // Entidad con mesh
-    entity = g3d_entity_spawn(scene, 0, 0, 0, 5);
-    g3d_entity_set_mesh(entity, cube_mesh);
-    g3d_entity_set_material(entity, material);
-    say("OK: Entity spawned: " + itoa(entity));
+    ent = g3d_entity_spawn(scene, 0, 0, 0, 5);
+    g3d_entity_set_mesh(ent, cube_mesh);
+    g3d_entity_set_material(ent, material);
+    say("OK: Entity spawned: " + itoa(ent));
 
     // Luz direccional blanca
     light = g3d_light_create(0, 1.0, 1.0, 1.0);
@@ -90,7 +90,7 @@ BEGIN
     LOOP
         // Rotacion suave (angulos en RADIANES): ~0.6 deg pitch, ~1.1 deg yaw por frame
         ang += 0.02;
-        g3d_entity_set_rotation(entity, ang * 0.5 * 57295.78, ang * 57295.78, 0.0);
+        g3d_entity_set_rotation(ent, ang * 0.5 * 57295.78, ang * 57295.78, 0.0);
 
         // Renderiza la escena 3D dentro de un GRAPH y lo muestra
 

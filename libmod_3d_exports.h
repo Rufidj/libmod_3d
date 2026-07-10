@@ -255,6 +255,17 @@ int64_t g3d_vehicle_yaw_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_speed_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_destroy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_step_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_apply_impulse_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_velocity_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_bounce_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_grounded_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_mesh_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params);
@@ -358,6 +369,17 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_VEHICLE_PITCH", "I", TYPE_FLOAT, g3d_vehicle_pitch_bgd),
     FUNC("G3D_VEHICLE_ROLL", "I", TYPE_FLOAT, g3d_vehicle_roll_bgd),
     FUNC("G3D_VEHICLE_SPEED", "I", TYPE_FLOAT, g3d_vehicle_speed_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE", "FFFFFFF", TYPE_INT, g3d_rigidbody_create_bgd),
+    FUNC("G3D_RIGIDBODY_DESTROY", "I", TYPE_INT, g3d_rigidbody_destroy_bgd),
+    FUNC("G3D_RIGIDBODY_CLEAR", "", TYPE_INT, g3d_rigidbody_clear_bgd),
+    FUNC("G3D_RIGIDBODY_STEP", "F", TYPE_INT, g3d_rigidbody_step_bgd),
+    FUNC("G3D_RIGIDBODY_APPLY_IMPULSE", "IFFF", TYPE_INT, g3d_rigidbody_apply_impulse_bgd),
+    FUNC("G3D_RIGIDBODY_SET_VELOCITY", "IFFF", TYPE_INT, g3d_rigidbody_set_velocity_bgd),
+    FUNC("G3D_RIGIDBODY_SET_BOUNCE", "IFF", TYPE_INT, g3d_rigidbody_set_bounce_bgd),
+    FUNC("G3D_RIGIDBODY_X", "I", TYPE_FLOAT, g3d_rigidbody_x_bgd),
+    FUNC("G3D_RIGIDBODY_Y", "I", TYPE_FLOAT, g3d_rigidbody_y_bgd),
+    FUNC("G3D_RIGIDBODY_Z", "I", TYPE_FLOAT, g3d_rigidbody_z_bgd),
+    FUNC("G3D_RIGIDBODY_GROUNDED", "I", TYPE_INT, g3d_rigidbody_grounded_bgd),
     FUNC("G3D_SKY_SET_TEXTURE", "I", TYPE_INT, g3d_sky_set_texture_bgd),
     FUNC("G3D_SKY_ENABLE", "I", TYPE_INT, g3d_sky_set_enabled_bgd),
     FUNC("G3D_MOUSE_CAPTURE", "I", TYPE_INT, g3d_mouse_capture_bgd),
