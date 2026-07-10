@@ -25,7 +25,7 @@ GLOBAL
     int spin[64];
     int spin_n = 0;
     float spin_yaw = 0.0;
-    int gid = 0;
+    
     float cx = 0.0;
     float cy = 16.0;
     float cz = -56.0;
@@ -80,14 +80,13 @@ BEGIN
         spin[spin_n] = ent;
         spin_n = spin_n + 1;
     END
-    
+
 END
 
 PROCESS main()
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
 
     scene = g3d_scene_create("Escena");
     g3d_scene_set_active(scene);
@@ -172,7 +171,7 @@ BEGIN
     y = 270;
 
     LOOP
-     
+
         IF (key(_LEFT))  yaw = yaw - ts; END
         IF (key(_RIGHT)) yaw = yaw + ts; END
         IF (key(_UP))    pitch = pitch + ts; END
@@ -200,13 +199,9 @@ BEGIN
             g3d_entity_set_rotation(spin[i], 0.0, spin_yaw * 57295.78, 0.0);
         END
 
-        gid = g3d_render(gid);
-        graph = gid;
-
         IF (key(_ESC)) BREAK; END
         FRAME;
-        write(0, 10, 10, 0, "FPS: " + frame_info.fps); 
+        write(0, 10, 10, 0, "FPS: " + frame_info.fps);
     END
 
-    g3d_shutdown();
 END

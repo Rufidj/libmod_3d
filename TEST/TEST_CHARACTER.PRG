@@ -16,7 +16,7 @@ END
 
 PROCESS main()
 PRIVATE
-    int light; int gid; int jmodel; int player; int ch; int i; int nanim;
+    int light; int jmodel; int player; int ch; int i; int nanim;
     int aidle; int awalk; int ajump; int grounded;
     float dt; float t; float msens;
     float camyaw; float campitch; float camdist; float eyeh;
@@ -30,7 +30,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_load("demo_beach.scene");
     IF (scene < 0) say("ERROR cargando demo_beach.scene"); RETURN; END
@@ -147,13 +147,13 @@ BEGIN
         g3d_camera_set_position(camera, tx - cfx * camdist, ty - cfy * camdist, tz - cfz * camdist);
         g3d_camera_look_at(camera, tx, ty, tz, 0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
     g3d_mouse_capture(0);
-    g3d_shutdown();
+    
 END

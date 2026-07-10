@@ -19,8 +19,35 @@
 #include "libmod_3d_camera.h"
 #include "libmod_3d_renderer.h"
 
+#include "bgddl.h"
+#include "libbggfx.h"
+#include "dlvaracc.h"
+
 #ifdef __cplusplus
 extern "C" {
+#endif
+
+/* --------------------------------------------------------------------------- */
+
+#define C_3D        2
+
+/* --------------------------------------------------------------------------- */
+
+#if !defined(__BGDC__)
+enum {
+    CSUBTYPE = 0,
+    COORDX,
+    COORDY,
+    COORDZ,
+    ANGLE_X,
+    ANGLE_Y,
+    ANGLE_Z,
+    SIZE,
+    SIZE_X,
+    SIZE_Y,
+    SIZE_Z,
+    ENTITY
+};
 #endif
 
 /* ============================================================================
@@ -443,5 +470,9 @@ int g3d_raycast(float sx, float sy, float sz, float dx, float dy, float dz,
 #ifdef __cplusplus
 }
 #endif
+
+/* --------------------------------------------------------------------------- */
+
+extern DLVARFIXUP __bgdexport( libmod_3d, locals_fixup )[];
 
 #endif /* __LIBMOD_3D_H */

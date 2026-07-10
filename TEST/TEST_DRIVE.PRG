@@ -16,7 +16,7 @@ END
 
 PROCESS main()
 PRIVATE
-    int light; int gid; int mbuggy; int veh; int buggy; int i;
+    int light; int mbuggy; int veh; int buggy; int i;
     float dt; float thr; float steer; float brk;
     float vx; float vy; float vz; float vyaw; float vpitch; float vroll;
     float yawoff; float cfx; float cfz; float cdist; float chh;
@@ -26,7 +26,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_load("demo_beach.scene");
     IF (scene < 0) say("ERROR cargando demo_beach.scene"); RETURN; END
@@ -122,12 +122,12 @@ BEGIN
         g3d_camera_set_position(camera, camx, camy, camz);
         g3d_camera_look_at(camera, vx, vy + 2.0, vz, 0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+    
 END

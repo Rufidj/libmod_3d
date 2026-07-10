@@ -48,7 +48,7 @@ END
 
 PROCESS main()
 PRIVATE
-    int light; int gid; int ch; int mbuggy; int i;
+    int light; int ch; int mbuggy; int i;
     float yaw; float pitch; float msens; float dt;
     float fwx; float fwy; float fwz; float rgx; float rgz;
     float wx; float wz; float wl; float spd; float eye;
@@ -58,7 +58,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_load("demo_beach.scene");
     IF (scene < 0) say("ERROR cargando demo_beach.scene"); RETURN; END
@@ -150,13 +150,13 @@ BEGIN
         g3d_camera_set_position(camera, px, py + eye, pz);
         g3d_camera_look_at(camera, px + fwx, py + eye + fwy, pz + fwz, 0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
     g3d_mouse_capture(0);
-    g3d_shutdown();
+    
 END

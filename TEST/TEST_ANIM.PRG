@@ -16,7 +16,7 @@ GLOBAL
     int scene; int camera; int light;
     int model; int nsub; int i;
     int parts[64];
-    int gid = 0;
+    
     float t = 0.0;
     int anim = 0; int nanim = 0;
     float dur = 0.0;
@@ -30,7 +30,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_create("Anim");
     g3d_scene_set_active(scene);
@@ -95,8 +95,8 @@ BEGIN
         g3d_camera_set_position(camera, sin(camang*1000)*9.0, 3.5, cos(camang*1000)*9.0);
         g3d_camera_look_at(camera, 0.0, 2.6, 0.0,  0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         write(0, 10, 10, 0, "Animacion " + itoa(anim) + "/" + itoa(nanim) + "  dur=" + ftoa(dur) + "s");
         write(0, 10, 28, 0, "LEFT/RIGHT cambian, ESC sale");
@@ -105,5 +105,5 @@ BEGIN
         FRAME;
     END
 
-    g3d_shutdown();
+    
 END

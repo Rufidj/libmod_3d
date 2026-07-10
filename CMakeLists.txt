@@ -73,7 +73,6 @@ endif()
 
 set(SOURCES_LIBMOD_3D
     libmod_3d.c
-    libmod_3d_bridge.c
     libmod_3d_math.c
     libmod_3d_shader.c
     libmod_3d_texture.c

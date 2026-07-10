@@ -279,6 +279,13 @@ void g3d_renderer_get_display_size(uint32_t *width, uint32_t *height) {
         *height = g_renderer.display_height;
 }
 
+void g3d_renderer_set_viewport_physical(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    g_renderer.vp_x = x;
+    g_renderer.vp_y = y;
+    g_renderer.vp_w = w;
+    g_renderer.vp_h = h;
+}
+
 void g3d_renderer_enable_shadows(int enabled, uint32_t resolution) {
     g_renderer.shadow_enabled = enabled;
     g_renderer.shadow_map_width = resolution;
@@ -339,7 +346,11 @@ void g3d_renderer_begin_frame(void) {
     }
     /* Bind target framebuffer (0 = screen, or a GRAPH-backed FBO) */
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.framebuffer);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    if (g_renderer.framebuffer == g_renderer.target_fbo) {
+        glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
+    } else {
+        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    }
 
     /* SDL_gpu leaves GL state that breaks raw rendering: scissor test may be
        enabled (clipping everything), clear color/masks may be changed. Reset
@@ -767,8 +778,12 @@ void g3d_renderer_resolve_hdr(void) {
     }
 
     /* resolve: HDR + bloom -> host target */
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.target_fbo);
+    if (g_renderer.target_fbo == 0) {
+        glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
+    } else {
+        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    }
     G3DShaderProgram *ts = (G3DShaderProgram *)g_renderer.tonemap_shader;
     g3d_shader_use(ts);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, g_renderer.hdr_color);
@@ -1111,7 +1126,11 @@ void g3d_renderer_forward_pass(void) {
     /* Bind target framebuffer (0 = screen, or a GRAPH-backed FBO) */
 #ifndef VITA
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.framebuffer);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    if (g_renderer.framebuffer == g_renderer.target_fbo) {
+        glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
+    } else {
+        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    }
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 #endif

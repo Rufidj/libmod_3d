@@ -15,7 +15,7 @@ GLOBAL
     int terr_tex;
     int water_tex;
     int pe;
-    int gid = 0;
+    
     float tod = 0.16;
     float tspeed = 0.0004;
 END
@@ -81,13 +81,13 @@ BEGIN
         IF (tod >= 0.5) tod = 0.12; END
         g3d_set_sun(tod);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+    
     say("=== Done ===");
 END

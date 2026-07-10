@@ -15,7 +15,7 @@ GLOBAL
     int texture;
     int light;
     int camera;
-    int gid = 0;
+
     float ang = 0.0;
     int frames = 0;
 END
@@ -26,11 +26,6 @@ BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
 
-    // Inicializar motor 3D
-    IF (!g3d_init(960, 540))
-        say("ERROR: Failed to initialize 3D engine");
-        RETURN;
-    END
     say("OK: 3D Engine initialized");
 
     // Escena
@@ -98,8 +93,8 @@ BEGIN
         g3d_entity_set_rotation(entity, ang * 0.5 * 57295.78, ang * 57295.78, 0.0);
 
         // Renderiza la escena 3D dentro de un GRAPH y lo muestra
-        gid = g3d_render(gid);
-        graph = gid;
+
+
 
         IF (key(_ESC))
             BREAK;
@@ -115,6 +110,6 @@ BEGIN
     END
 
     say("OK: Render loop completed");
-    g3d_shutdown();
+
     say("=== Test Complete ===");
 END

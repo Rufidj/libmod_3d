@@ -1,6 +1,6 @@
 SCENE editor
-HEIGHTMAP /home/ruben/BennuGD2/modules/libmod_3d/TEST/demo_height.g3dh /home/ruben/BennuGD2/modules/libmod_3d/TEST/demo_terrain.png
-VOXTERRAIN /home/ruben/BennuGD2/modules/libmod_3d/TEST/demo_terrain.g3dv _
+HEIGHTMAP demo_height.g3dh demo_terrain.png
+VOXTERRAIN demo_terrain.g3dv _
 VOXSPRING -2.30631 -4.07664 -22.4078 4
 SKY_GRADIENT 0.30 0.50 0.85 0.80 0.88 0.96
 AMBIENT 0.5 0.52 0.55 1.0

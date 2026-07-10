@@ -20,7 +20,7 @@ GLOBAL
     int i;
     float ox;
     float oz;
-    int gid = 0;
+    
     float tod = 0.05;     // time of day 0..1
     float tspeed = 0.00104;  // ~16s full cycle
 END
@@ -83,13 +83,13 @@ BEGIN
         IF (tod >= 1.0) tod = tod - 1.0; END
         g3d_set_sun(tod);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+    
     say("=== Done ===");
 END

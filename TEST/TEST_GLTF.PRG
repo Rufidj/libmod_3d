@@ -12,7 +12,7 @@ GLOBAL
     int light;
     int ground_mesh;
     int ground_mat;
-    int gid = 0;
+
     float ang = 0.0;
     // todas las submallas de ambos modelos
     int parts[64];
@@ -68,11 +68,6 @@ BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
 
-    IF (!g3d_init(960, 540))
-        say("ERROR: 3D init failed");
-        RETURN;
-    END
-
     scene = g3d_scene_create("glTF");
     g3d_scene_set_active(scene);
 
@@ -108,13 +103,13 @@ BEGIN
             g3d_entity_set_rotation(parts[i], 0.0, ang * 57295.78, 0.0);
         END
 
-        gid = g3d_render(gid);
-        graph = gid;
+
+
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+
     say("=== Done ===");
 END

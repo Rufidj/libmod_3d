@@ -32,7 +32,7 @@
 #include "libmod_3d_cloth.h"
 
 #include <SDL.h>
-#include "bgddl.h"
+#include "SDL_gpu.h"
 #include "xstrings.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -46,6 +46,60 @@
  */
 
 static int g_3d_initialized = 0;
+static int64_t g3d_engine_obj_id = 0;
+
+/* C_3D ctype value — must match the constant exported in libbggfx_exports.h */
+#define C_3D_CTYPE 2
+
+/* Indices into libmod_3d locals_fixup[] (same order as DLVARFIXUP in exports) */
+enum {
+    LOC3D_CSUBTYPE = 0,
+    LOC3D_COORDX,
+    LOC3D_COORDY,
+    LOC3D_COORDZ,
+    LOC3D_ANGLE_X,
+    LOC3D_ANGLE_Y,
+    LOC3D_ANGLE_Z,
+    LOC3D_SIZE,
+    LOC3D_SIZE_X,
+    LOC3D_SIZE_Y,
+    LOC3D_SIZE_Z,
+    LOC3D_ENTITY,
+    LOC3D_TARGET_X,
+    LOC3D_TARGET_Y,
+    LOC3D_TARGET_Z,
+    LOC3D_FOV,
+    LOC3D_INTENSITY,
+    LOC3D_RANGE,
+    LOC3D_CONE_ANGLE,
+    LOC3D_COLORR,
+    LOC3D_COLORG,
+    LOC3D_COLORB
+
+};
+
+DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
+    { "csubtype"  , NULL, -1, -1 },
+    { "x"         , NULL, -1, -1 },
+    { "y"         , NULL, -1, -1 },
+    { "z"         , NULL, -1, -1 },
+    { "angle_x"   , NULL, -1, -1 },
+    { "angle_y"   , NULL, -1, -1 },
+    { "angle_z"   , NULL, -1, -1 },
+    { "size"      , NULL, -1, -1 },
+    { "size_x"    , NULL, -1, -1 },
+    { "size_y"    , NULL, -1, -1 },
+    { "size_z"    , NULL, -1, -1 },
+    { "entity"    , NULL, -1, -1 },
+    { "target_x"  , NULL, -1, -1 },
+    { "target_y"  , NULL, -1, -1 },
+    { "target_z"  , NULL, -1, -1 },
+    { "fov"       , NULL, -1, -1 },
+    { "intensity" , NULL, -1, -1 },
+    { "range"     , NULL, -1, -1 },
+    { "cone_angle", NULL, -1, -1 },
+    { NULL        , NULL, -1, -1 }
+};
 
 /* ============================================================================
    CORE INITIALIZATION
@@ -105,25 +159,20 @@ int g3d_engine_render(void) {
    ============================================================================
  */
 
-int64_t g3d_init_bgd(INSTANCE *my, int64_t *params) {
-    int width = (int)params[0];
-    int height = (int)params[1];
-    return g3d_engine_init(width, height);
-}
 
-int64_t g3d_shutdown_bgd(INSTANCE *my, int64_t *params) {
-    return g3d_engine_shutdown();
-}
 
-int64_t g3d_render_bgd(INSTANCE *my, int64_t *params) {
-    /* Render into a BennuGD GRAPH and return its id so the script can draw it.
-       params[0] = graph id (0 to auto-create on first call). */
-    extern int g3d_bridge_render_to_graph(int64_t graph_id);
-    return g3d_bridge_render_to_graph(params[0]);
+static void g3d_ensure_init(void) {
+    if (g_3d_initialized) return;
+    if (renderer_scaled_width > 0 && renderer_scaled_height > 0) {
+        g3d_engine_init((int)renderer_scaled_width, (int)renderer_scaled_height);
+        g3d_renderer_set_viewport_physical((uint32_t)renderer_offset_x, (uint32_t)renderer_offset_y,
+                                           (uint32_t)renderer_scaled_width, (uint32_t)renderer_scaled_height);
+    }
 }
 
 /* Scene wrappers */
 int64_t g3d_scene_create_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     const char *name = (const char *)string_get(params[0]);
     int64_t result = g3d_scene_impl_create(name);
     string_discard(params[0]);
@@ -216,6 +265,7 @@ static G3DCamera *g3d_bgd_camera_get(int id) {
 }
 
 int64_t g3d_camera_create_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     if (g_bgd_camera_count >= G3D_MAX_BGD_CAMERAS)
         return -1;
 
@@ -423,6 +473,7 @@ int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params) {
 
 /* Texture & Model wrappers */
 int64_t g3d_texture_load_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
     G3DTexture *tex = g3d_texture_load_impl(filename);
     string_discard(params[0]);
@@ -433,6 +484,7 @@ int64_t g3d_texture_load_bgd(INSTANCE *my, int64_t *params) {
 }
 
 int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
     G3DModel *model = g3d_gltf_load(filename);
     string_discard(params[0]);
@@ -442,12 +494,14 @@ int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params) {
 }
 
 int64_t g3d_model_load_obj_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
     G3DModel *model = g3d_obj_load(filename);
     string_discard(params[0]);
     return model ? (int64_t)(intptr_t)model : -1;
 }
 int64_t g3d_model_load_fbx_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
     G3DModel *model = g3d_fbx_load(filename);
     string_discard(params[0]);
@@ -686,12 +740,14 @@ int64_t g3d_model_spawn_bgd(INSTANCE *my, int64_t *params) {
 }
 
 int64_t g3d_model_load_md3_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     string_discard(params[0]);
     return -1;
 }
 
 /* Material wrappers */
 int64_t g3d_material_create_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     return g3d_material_impl_create();
 }
 
@@ -1321,6 +1377,7 @@ int64_t g3d_particles_clear_bgd(INSTANCE *my, int64_t *params) {
 
 /* Lighting wrappers */
 int64_t g3d_light_create_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
     int type = (int)params[0];
     float r = *(float *)&params[1];
     float g = *(float *)&params[2];
@@ -1520,8 +1577,138 @@ int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD
 int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_roll((int)params[0])); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_speed_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_speed((int)params[0]); return (int64_t) * (int32_t *)&v; }
 
-void __bgdexport(libmod_3d, module_initialize)() {}
-void __bgdexport(libmod_3d, module_finalize)() {}
+static int g3d_object_info(void *what, REGION *clip, int64_t *key, int64_t *ready) {
+    *key = INT64_MAX; /* Highest Z -> draws first / at the bottom */
+    *ready = 1;
+
+    if (!renderer_scaled_width || !renderer_scaled_height)
+        return 0;
+
+    /* Initialize the engine on the first frame if not done yet */
+    if (!g_3d_initialized) {
+        g3d_engine_init(renderer_scaled_width, renderer_scaled_height);
+    }
+
+    /* Keep the 3D viewport in sync with BGD's scaled physical viewport */
+    g3d_renderer_set_viewport_physical((uint32_t)renderer_offset_x, (uint32_t)renderer_offset_y,
+                                       (uint32_t)renderer_scaled_width, (uint32_t)renderer_scaled_height);
+
+    return 1;
+}
+
+static void g3d_object_draw(void *what, REGION *clip) {
+    if (g_3d_initialized) {
+        /* Flush any queued 2D rendering (e.g. GPU_Clear or background map) */
+        GPU_FlushBlitBuffer();
+
+        /* Render directly into FBO 0 */
+        g3d_engine_render();
+
+        /* Reset SDL_gpu state so 2D sprites can draw correctly on top */
+        GPU_ResetRendererState();
+    }
+}
+
+/* ============================================================================
+   PROCESS INSTANCE HOOK — called by libbggfx for every C_3D process each frame
+   (during the info phase, before draw). Syncs 3D transforms from local vars.
+   ============================================================================
+ */
+
+static void g3d_process_instance_hook( INSTANCE * i ) {
+    int64_t csubtype = LOCQWORD( libmod_3d, i, LOC3D_CSUBTYPE );
+    int entity_id = (int) LOCQWORD( libmod_3d, i, LOC3D_ENTITY );
+
+    if ( !entity_id ) return;
+
+    /* World-space position from standard x/y/z BGD locals */
+    float px = (float) LOCDOUBLE( libmod_3d, i, LOC3D_COORDX );
+    float py = (float) LOCDOUBLE( libmod_3d, i, LOC3D_COORDY );
+    float pz = (float) LOCDOUBLE( libmod_3d, i, LOC3D_COORDZ );
+
+    /* Rotation — stored as BGD millidegrees, convert to radians */
+    float rx = G3D_MD2RAD( LOCDOUBLE( libmod_3d, i, LOC3D_ANGLE_X ) );
+    float ry = G3D_MD2RAD( LOCDOUBLE( libmod_3d, i, LOC3D_ANGLE_Y ) );
+    float rz = G3D_MD2RAD( LOCDOUBLE( libmod_3d, i, LOC3D_ANGLE_Z ) );
+
+    /* Scale — same priority logic as 2D: scale_x/y/z > size_x/size_y > size */
+    double size = LOCDOUBLE( libmod_3d, i, LOC3D_SIZE );  /* "size"   */
+    double sx = LOCDOUBLE( libmod_3d, i, LOC3D_SIZE_X );
+    double sy = LOCDOUBLE( libmod_3d, i, LOC3D_SIZE_Y );
+    double sz = LOCDOUBLE( libmod_3d, i, LOC3D_SIZE_Z );
+    sx = ( sx != 100.0 ) ? sx : size;
+    sy = ( sy != 100.0 ) ? sy : size;
+    sz = ( sz != 100.0 ) ? sz : size;
+    /* Convert percentage to factor (100 = 1.0) */
+    float fsx = (float)( sx * 0.01 );
+    float fsy = (float)( sy * 0.01 );
+    float fsz = (float)( sz * 0.01 );
+
+    /* Target for Lights / Cameras */
+    float tx = (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_X );
+    float ty = (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_Y );
+    float tz = (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_Z );
+
+    switch ( csubtype ) {
+        case 1: /* C3D_ENTITY */
+            g3d_entity_impl_set_position( entity_id, px, py, pz );
+            g3d_entity_impl_set_rotation( entity_id, rx, ry, rz );
+            g3d_entity_impl_set_scale(    entity_id, fsx, fsy, fsz );
+            break;
+        case 2: { /* C3D_LIGHT */
+            g3d_light_impl_set_position( entity_id, px, py, pz );
+
+            float dx = tx - px;
+            float dy = ty - py;
+            float dz = tz - pz;
+            if ( dx != 0.0f || dy != 0.0f || dz != 0.0f ) {
+                g3d_light_impl_set_direction( entity_id, dx, dy, dz );
+            }
+
+            float intensity = (float) LOCDOUBLE( libmod_3d, i, LOC3D_INTENSITY );
+            g3d_light_impl_set_intensity( entity_id, intensity );
+
+            float range = (float) LOCDOUBLE( libmod_3d, i, LOC3D_RANGE );
+            g3d_light_impl_set_range( entity_id, range );
+
+            float cone = (float) LOCDOUBLE( libmod_3d, i, LOC3D_CONE_ANGLE );
+            g3d_light_impl_set_cone( entity_id, cone );
+
+            float r = LOCBYTE( libmod_3d, i, LOC3D_COLORR ) / 255.0f;
+            float g = LOCBYTE( libmod_3d, i, LOC3D_COLORG ) / 255.0f;
+            float b = LOCBYTE( libmod_3d, i, LOC3D_COLORB ) / 255.0f;
+            g3d_light_impl_set_color( entity_id, r, g, b );
+            break;
+        }
+        case 3: { /* C3D_CAMERA */
+            G3DCamera *cam = g3d_bgd_camera_get( entity_id );
+            if ( cam ) {
+                g3d_camera_set_position_impl( cam, vec3_make( px, py, pz ) );
+                g3d_camera_look_at_impl( cam, vec3_make( tx, ty, tz ), vec3_make( 0.0f, 1.0f, 0.0f ) );
+
+                float fov = (float) LOCDOUBLE( libmod_3d, i, LOC3D_FOV );
+                g3d_camera_set_perspective( cam, fov, 16.0f / 9.0f, 0.1f, 1000.0f );
+            }
+            break;
+        }
+        default:
+            break;
+    }
+
+}
+
+void __bgdexport(libmod_3d, module_initialize)() {
+    g3d_engine_obj_id = gr_new_object(INT64_MAX, g3d_object_info, g3d_object_draw, NULL);
+    /* Register per-process hook for all C_3D instances */
+    gr_register_instance_ctype_hook( C_3D_CTYPE, g3d_process_instance_hook );
+}
+
+void __bgdexport(libmod_3d, module_finalize)() {
+    if (g3d_engine_obj_id) {
+        gr_destroy_object(g3d_engine_obj_id);
+        g3d_engine_obj_id = 0;
+    }
+    g3d_engine_shutdown();
+}
 
 #include "libmod_3d_exports.h"
-

@@ -14,7 +14,7 @@ GLOBAL
     int texture;
     int light;
     int camera;
-    int gid = 0;
+
     float ang = 0.0;
     int frames = 0;
 END
@@ -24,10 +24,6 @@ BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
 
-    IF (!g3d_init(960, 540))
-        say("ERROR: 3D init failed");
-        RETURN;
-    END
     say("OK: 3D Engine initialized");
 
     scene = g3d_scene_create("Terrain");
@@ -87,8 +83,8 @@ BEGIN
         ang += 0.008;
         g3d_entity_set_rotation(entity, 0.0, ang * 57295.78, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+
+
 
         IF (key(_ESC)) BREAK; END
 
@@ -99,6 +95,6 @@ BEGIN
     END
 
     say("OK: done");
-    g3d_shutdown();
+
     say("=== Test Complete ===");
 END

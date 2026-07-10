@@ -31,6 +31,7 @@ typedef struct {
     uint32_t display_height;
     uint32_t framebuffer;       /* GL framebuffer object */
     int flip_y;                 /* flip projection Y (BennuGD GRAPH); editor=0 */
+    uint32_t vp_x, vp_y, vp_w, vp_h; /* physical viewport */
 
     /* Camera */
     G3DCamera *active_camera;
@@ -142,8 +143,11 @@ void g3d_renderer_set_target(uint32_t fbo);
 /* Override the projection Y-flip (call after set_target). Editor uses 0. */
 void g3d_renderer_set_flip(int flip);
 
-/* Update the render viewport size (e.g. when an editor window resizes). */
+/* Update the render viewport size (logical size). */
 void g3d_renderer_set_viewport_size(uint32_t w, uint32_t h);
+
+/* Set the physical viewport on the actual target (handles letterbox/overscan) */
+void g3d_renderer_set_viewport_physical(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 
 /* Get the renderer's logical display/viewport size */
 void g3d_renderer_get_display_size(uint32_t *width, uint32_t *height);

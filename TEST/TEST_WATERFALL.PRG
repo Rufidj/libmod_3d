@@ -18,7 +18,7 @@ GLOBAL
     int pe;
     int spray;
     int splash;
-    int gid = 0;
+    
     float htop;
     float hmid;
     // camara libre
@@ -127,13 +127,13 @@ BEGIN
         g3d_camera_set_position(camera, cx, cy, cz);
         g3d_camera_look_at(camera, cx + fwx, cy + fwy, cz + fwz,  0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+    
     say("=== Done ===");
 END

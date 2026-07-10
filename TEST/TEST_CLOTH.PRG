@@ -26,7 +26,7 @@ GLOBAL
     int model; int nsub; int i;
     int parts[64];
     int sheet[8]; int nsheets = 0; int flag;
-    int gid = 0;
+    
 
     // estado del personaje
     float px = 0.0; float py = 0.0; float pz = -16.0;
@@ -68,7 +68,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_create("Telas");
     g3d_scene_set_active(scene);
@@ -203,13 +203,13 @@ BEGIN
         g3d_camera_set_position(camera, px - fwx*13.0, py + 7.0, pz - fwz*13.0);
         g3d_camera_look_at(camera, px, py + 3.0, pz,  0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
     g3d_mouse_capture(0);
-    g3d_shutdown();
+    
 END

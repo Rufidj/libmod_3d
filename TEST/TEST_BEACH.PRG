@@ -12,7 +12,7 @@ import "libmod_input";
 import "libmod_3d";
 
 GLOBAL
-    int scene; int camera; int light; int gid = 0;
+    int scene; int camera; int light; 
     // camara libre
     float camx = 0.0; float camy = 30.0; float camz = -120.0;
     float yaw = 0.0; float pitch = -10.0;
@@ -79,7 +79,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_load("demo_beach.scene");
     IF (scene < 0) say("ERROR cargando demo_beach.scene"); RETURN; END
@@ -270,13 +270,13 @@ BEGIN
             g3d_camera_look_at(camera, camx + fwx, camy + fwy, camz + fwz, 0.0, 1.0, 0.0);
         END
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
     g3d_mouse_capture(0);
-    g3d_shutdown();
+    
 END

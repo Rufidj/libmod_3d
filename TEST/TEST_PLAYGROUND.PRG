@@ -18,7 +18,7 @@ GLOBAL
     int player_mat;
     int pillar_mat;
     int player;
-    int gid = 0;
+
     float px = 0.0;
     float pz = 0.0;
     float py = 0.0;
@@ -34,11 +34,6 @@ PROCESS main()
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-
-    IF (!g3d_init(960, 540))
-        say("ERROR: 3D init failed");
-        RETURN;
-    END
 
     scene = g3d_scene_create("Playground");
     g3d_scene_set_active(scene);
@@ -128,13 +123,13 @@ BEGIN
         g3d_camera_set_position(camera, px, py + 14.0, pz - 20.0);
         g3d_camera_look_at(camera, px, py, pz,  0.0, 1.0, 0.0);
 
-        gid = g3d_render(gid);
-        graph = gid;
+
+
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+
     say("=== Done ===");
 END

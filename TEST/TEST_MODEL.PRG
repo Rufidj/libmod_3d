@@ -17,7 +17,7 @@ GLOBAL
     int scene; int camera; int light;
     int model; int nsub; int i;
     int parts[64];
-    int gid = 0;
+    
     float pitch = 0.0;   // grados
     float yaw = 0.0;
     int prev = 0;
@@ -29,7 +29,7 @@ PRIVATE
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_create("Inspector");
     g3d_scene_set_active(scene);
@@ -94,11 +94,11 @@ BEGIN
             say("pitch(rad)=" + ftoa(pitch * 0.01745) + "  yaw(rad)=" + ftoa(yaw * 0.01745));
         END
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+    
 END

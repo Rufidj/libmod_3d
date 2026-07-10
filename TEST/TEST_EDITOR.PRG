@@ -20,7 +20,7 @@ GLOBAL
     int tool = 0;            // 0 pilar 1 room 2 raise 3 lower 4 smooth 5 rock 6 grass
     float brush = 8.0;
     int placed = 0; int prevclick = 0; int e;
-    int gid = 0;
+    
     float cx = 0.0; float cy = 22.0; float cz = -45.0;
     float yaw = 0.0; float pitch = -24.0;
     float fwx; float fwy; float fwz;
@@ -32,7 +32,7 @@ PROCESS main()
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
-    IF (!g3d_init(960, 540)) RETURN; END
+    
 
     scene = g3d_scene_create("Editor");
     g3d_scene_set_active(scene);
@@ -142,12 +142,12 @@ BEGIN
         END
         prevclick = mouse.left;
 
-        gid = g3d_render(gid);
-        graph = gid;
+        
+        
 
         IF (key(_ESC)) BREAK; END
         FRAME;
     END
 
-    g3d_shutdown();
+    
 END

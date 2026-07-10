@@ -12,9 +12,45 @@
 
 #if defined(__BGDC__) || !defined(__STATIC__)
 
+#include "libmod_3d.h"
+
 /* Constants exported */
 DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
-    {"G3D_LIGHT_DIRECTIONAL", TYPE_INT, 0}, {NULL, 0, 0}};
+    /* 3D */
+    { "C_3D",                   TYPE_QWORD, C_3D},
+
+    /* Light types */
+    {"G3D_LIGHT_DIRECTIONAL",   TYPE_INT,   0},
+    {"G3D_LIGHT_POINT",         TYPE_INT,   1},
+    {"G3D_LIGHT_SPOT",          TYPE_INT,   2},
+
+    /* CSUBTYPE values for C_3D processes */
+    {"C3D_ENTITY",              TYPE_QWORD, 1},
+    {"C3D_LIGHT",               TYPE_QWORD, 2},
+    {"C3D_CAMERA",              TYPE_QWORD, 3},
+
+    {NULL, 0, 0}
+};
+
+/* --------------------------------------------------------------------------- */
+/* Local variables added to every process when libmod_3d is loaded             */
+
+char * __bgdexport(libmod_3d, locals_def) =
+    "DOUBLE angle_x=0.0;\n"
+    "DOUBLE angle_y=0.0;\n"
+    "DOUBLE angle_z=0.0;\n"
+//    "DOUBLE size_x=100.0;\n"
+//    "DOUBLE size_y=100.0;\n"
+    "DOUBLE size_z=100.0;\n"
+    "INT entity=0;\n"
+    "DOUBLE target_x=0.0;\n"
+    "DOUBLE target_y=0.0;\n"
+    "DOUBLE target_z=0.0;\n"
+    "DOUBLE fov=60.0;\n"
+    "DOUBLE intensity=1.0;\n"
+    "DOUBLE range=100.0;\n"
+    "DOUBLE cone_angle=45.0;\n"
+    ;
 
 #endif
 
@@ -225,9 +261,9 @@ int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_submesh_map_bgd(INSTANCE *my, int64_t *params);
 
 DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
-    FUNC("G3D_INIT", "II", TYPE_INT, g3d_init_bgd),
-    FUNC("G3D_SHUTDOWN", "", TYPE_INT, g3d_shutdown_bgd),
-    FUNC("G3D_RENDER", "I", TYPE_INT, g3d_render_bgd),
+    // FUNC("G3D_INIT", "II", TYPE_INT, g3d_init_bgd),
+    // FUNC("G3D_SHUTDOWN", "", TYPE_INT, g3d_shutdown_bgd),
+    // FUNC("G3D_RENDER", "I", TYPE_INT, g3d_render_bgd),
     FUNC("G3D_SCENE_CREATE", "S", TYPE_INT, g3d_scene_create_bgd),
     FUNC("G3D_SCENE_DESTROY", "I", TYPE_INT, g3d_scene_destroy_bgd),
     FUNC("G3D_SCENE_SET_ACTIVE", "I", TYPE_INT, g3d_scene_set_active_bgd),
