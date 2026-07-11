@@ -1,9 +1,7 @@
 // ============================================================================
-//  TEST_PHYSICS.PRG - Rigid bodies al estilo BennuGD2: UN PROCESS por caja.
-//  Cada caja es un proceso con su cuerpo fisico + modelo en locals y su bucle
-//  FRAME. main() solo avanza el mundo (g3d_rigidbody_step) y renderiza.
-//  WASD+raton = camara libre,  ESPACIO = lanzar una caja,  ESC = salir.
-//  El C solo simula; el juego usa la filosofia de procesos de BennuGD.
+//  TEST_DESTROY.PRG - Destruccion con Jolt: un muro de cajas de madera que
+//  demueles a barrilazos. Cada caja y cada barril es un cuerpo rigido Jolt.
+//  WASD+raton = camara,  ESPACIO = lanzar barril,  ESC = salir.
 // ============================================================================
 import "libmod_gfx";
 import "libmod_misc";
@@ -13,22 +11,23 @@ import "libmod_3d";
 GLOBAL
     int scene;
     int camera;
+    int mbox;
     int mbarrel;
     int quit;
 END
 
-// --- Una caja = un proceso autonomo (idiom BennuGD) ---
-PROCESS crate(float px, float py, float pz, float ivx, float ivy, float ivz)
+// Un cuerpo rigido generico (caja Jolt) + su modelo. Un proceso por objeto.
+PROCESS prop(int model, float hx, float hy, float hz, float scale, float mass,
+             float px, float py, float pz, float ivx, float ivy, float ivz)
 PRIVATE
     int body; int mdl;
 BEGIN
-    mdl  = g3d_model_spawn(scene, mbarrel, px, py, pz, 3.0, rand(0, 359) * 1000);
-    body = g3d_rigidbody_create(px, py, pz, 1.2, 1.5, 1.2, 6.0);   // caja AABB, masa 6
-    g3d_rigidbody_set_velocity(body, ivx, ivy, ivz);
-    // (con Jolt NO metemos giro manual: el motor hace tumbar al chocar, natural)
-
+    mdl  = g3d_model_spawn(scene, model, px, py, pz, scale, 0);
+    body = g3d_rigidbody_create(px, py, pz, hx, hy, hz, mass);
+    IF (ivx <> 0.0 OR ivy <> 0.0 OR ivz <> 0.0)
+        g3d_rigidbody_set_velocity(body, ivx, ivy, ivz);
+    END
     LOOP
-        // sincronizar posicion Y orientacion con mi cuerpo (el step lo hace main)
         g3d_entity_set_position(mdl, g3d_rigidbody_render_x(body),
                                      g3d_rigidbody_render_y(body),
                                      g3d_rigidbody_render_z(body));
@@ -43,11 +42,12 @@ END
 
 PROCESS main()
 PRIVATE
-    int light; int gid; int i; int ksp;
+    int light; int i; int col; int row; int ksp;
     float dt; float msens;
     float camx; float camy; float camz; float yaw; float pitch;
     float fwx; float fwy; float fwz; float rgx; float rgz; float spd;
     float sx; float sz; float gy; float ty; float tz;
+    float wallx; float wallz; float wallg; float bx; float by;
 BEGIN
     set_mode(960, 540);
     set_fps(60, 0);
@@ -75,6 +75,7 @@ BEGIN
     g3d_set_bloom(1, 0.30, 1.1);
     g3d_set_ssao(1, 0.5, 1.2);
 
+    mbox    = g3d_load_gltf("assets/wood_box.glb");
     mbarrel = g3d_load_gltf("assets/barrel.glb");
 
     // tierra firme
@@ -87,25 +88,30 @@ BEGIN
 
     g3d_physics_set_gravity(24.0);
 
-    // torre de cajas que cae y se apila (cada una es un proceso)
-    FOR (i = 0; i < 7; i = i + 1)
-        crate(sx, gy + 6.0 + i * 3.4, sz, 0.0, 0.0, 0.0);
+    // --- MURO de cajas de madera (6 ancho x 5 alto, cubos de 2u) ---
+    wallx = sx; wallz = sz - 24.0;
+    wallg = g3d_scene_terrain_height(wallx, wallz);
+    FOR (row = 0; row < 5; row = row + 1)
+        FOR (col = 0; col < 6; col = col + 1)
+            bx = wallx + (col - 2.5) * 2.02;
+            by = wallg + 1.0 + row * 2.02;
+            // caja: semiejes 1,1,1 (cubo de 2u), escala visual 2, masa 4
+            prop(mbox, 1.0, 1.0, 1.0, 2.0, 4.0, bx, by, wallz, 0.0, 0.0, 0.0);
+        END
     END
 
     quit = 0;
-    camx = sx - 22.0; camy = gy + 12.0; camz = sz - 22.0;
-    yaw = 45.0; pitch = -18.0; msens = 0.18; dt = 1.0 / 60.0; spd = 1.2;
+    camx = sx; camy = gy + 4.0; camz = sz + 6.0;
+    yaw = 180.0; pitch = -6.0; msens = 0.18; dt = 1.0 / 60.0; spd = 1.0;
 
     x = 480; y = 270;
-    write(0, 10, 10, 0, "WASD+raton mover camara - ESPACIO lanzar caja - ESC salir");
+    write(0, 10, 10, 0, "WASD+raton mover - ESPACIO lanzar barril - ESC salir");
     write(0, 820, 10, 0, "FPS:"); write_var(0, 860, 10, 0, frame_info.fps);
     g3d_mouse_capture(1);
 
     LOOP
-        // ---- avanzar la simulacion (una vez por frame) ----
         g3d_rigidbody_step(dt);
 
-        // ---- camara libre ----
         g3d_mouse_update();
         yaw = yaw + g3d_mouse_dx() * msens;
         pitch = pitch - g3d_mouse_dy() * msens;
@@ -122,13 +128,13 @@ BEGIN
         g3d_camera_set_position(camera, camx, camy, camz);
         g3d_camera_look_at(camera, camx + fwx, camy + fwy, camz + fwz, 0.0, 1.0, 0.0);
 
-        // ---- lanzar una caja (nuevo proceso) con impulso hacia delante ----
+        // lanzar barril pesado y rapido -> destroza el muro
         IF (key(_SPACE) AND ksp == 0)
-            crate(camx + fwx * 4.5, camy + fwy * 4.5, camz + fwz * 4.5,
-                  fwx * 18.0, fwy * 18.0 + 3.0, fwz * 18.0);
+            prop(mbarrel, 1.2, 1.5, 1.2, 3.0, 9.0,
+                 camx + fwx * 4.5, camy + fwy * 4.5, camz + fwz * 4.5,
+                 fwx * 32.0, fwy * 32.0 + 2.0, fwz * 32.0);
         END
         ksp = key(_SPACE);
-
 
         IF (key(_ESC)) quit = 1; BREAK; END
         FRAME;

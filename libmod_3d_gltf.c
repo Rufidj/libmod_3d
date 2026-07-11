@@ -104,8 +104,12 @@ static G3DTexture *gltf_load_base_color(cgltf_material *mat,
 }
 
 /* Build one submesh from every triangle primitive that uses `target` material
-   (target == NULL collects primitives with no material). Returns NULL if none. */
-static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target) {
+   (target == NULL collects primitives with no material). If only_node != NULL
+   the material filter is ignored and only that node's primitives are collected
+   (used by the fracture loader: one submesh per node/chunk). Returns NULL if
+   none. */
+static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
+                              cgltf_node *only_node) {
     uint32_t cap_v = 4096;   /* grows as needed (uint32 indices, no hard cap) */
     G3DVertex *verts = (G3DVertex *)malloc(cap_v * sizeof(G3DVertex));
     uint32_t *indices = NULL;
@@ -119,6 +123,8 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target) {
     for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
         cgltf_node *node = &data->nodes[ni];
         if (!node->mesh)
+            continue;
+        if (only_node && node != only_node)
             continue;
 
         /* Skinned meshes: the raw vertex positions are already the bind pose
@@ -137,7 +143,7 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target) {
             cgltf_primitive *prim = &mesh->primitives[pi];
             if (prim->type != cgltf_primitive_type_triangles)
                 continue;
-            if (prim->material != target)
+            if (!only_node && prim->material != target)
                 continue;
 
             cgltf_accessor *a_pos = NULL, *a_nrm = NULL, *a_uv = NULL, *a_col = NULL;
@@ -465,7 +471,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     int sub = 0;
 
     for (cgltf_size m = 0; m < data->materials_count; m++) {
-        G3DMesh *sm = build_submesh(data, &data->materials[m]);
+        G3DMesh *sm = build_submesh(data, &data->materials[m], NULL);
         if (!sm)
             continue;
         meshes[sub] = *sm;           /* copy mesh struct into the array */
@@ -475,7 +481,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     }
     /* Primitives without a material */
     {
-        G3DMesh *sm = build_submesh(data, NULL);
+        G3DMesh *sm = build_submesh(data, NULL, NULL);
         if (sm) {
             meshes[sub] = *sm;
             free(sm);
@@ -514,6 +520,87 @@ G3DModel *g3d_gltf_load(const char *filepath) {
            filepath, sub, (int)data->images_count, (int)data->materials_count,
            meshes[0].aabb_max[1] - meshes[0].aabb_min[1],
            model->animation_count, model->joint_count);
+
+    cgltf_free(data);
+    return model;
+}
+
+/* Fracture loader: one submesh PER NODE (not per material), so a pre-fractured
+   model whose chunks all share one material still comes in as N separate
+   submeshes. Each submesh keeps its chunk's baked world position, so its AABB
+   centre is the chunk centroid the physics uses. Static geometry only (no
+   skeleton/animation). */
+G3DModel *g3d_gltf_load_fractured(const char *filepath) {
+    if (!filepath)
+        return NULL;
+
+    cgltf_options options;
+    memset(&options, 0, sizeof(options));
+    cgltf_data *data = NULL;
+
+    if (cgltf_parse_file(&options, filepath, &data) != cgltf_result_success) {
+        fprintf(stderr, "G3D: glTF parse failed: %s\n", filepath);
+        return NULL;
+    }
+    if (cgltf_load_buffers(&options, data, filepath) != cgltf_result_success) {
+        fprintf(stderr, "G3D: glTF buffer load failed: %s\n", filepath);
+        cgltf_free(data);
+        return NULL;
+    }
+
+    /* Cache one texture per material so shared-material chunks don't re-upload
+       (and don't create duplicate GPU handles to free). */
+    int mc = (int)data->materials_count;
+    void **mat_tex = mc ? (void **)calloc(mc, sizeof(void *)) : NULL;
+    for (int m = 0; m < mc; m++)
+        mat_tex[m] = gltf_load_base_color(&data->materials[m], filepath);
+
+    int max_sub = (int)data->nodes_count + 1;
+    G3DMesh *meshes = (G3DMesh *)calloc(max_sub, sizeof(G3DMesh));
+    void **textures = (void **)calloc(max_sub, sizeof(void *));
+    int sub = 0;
+
+    for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
+        cgltf_node *node = &data->nodes[ni];
+        if (!node->mesh)
+            continue;
+        G3DMesh *sm = build_submesh(data, NULL, node);
+        if (!sm)
+            continue;
+        meshes[sub] = *sm;
+        free(sm);
+        /* Texture from this node's first primitive material (cached). */
+        void *tex = NULL;
+        for (cgltf_size pi = 0; pi < node->mesh->primitives_count; pi++) {
+            cgltf_material *pm = node->mesh->primitives[pi].material;
+            if (pm) { tex = mat_tex[(int)(pm - data->materials)]; break; }
+        }
+        textures[sub] = tex;
+        sub++;
+    }
+    free(mat_tex);
+
+    if (sub == 0) {
+        fprintf(stderr, "G3D: glTF (fractured) has no triangle geometry: %s\n", filepath);
+        free(meshes); free(textures); cgltf_free(data);
+        return NULL;
+    }
+
+    /* Recenter the whole assembled model as one group (chunks keep their
+       relative offsets, so each submesh AABB is the chunk's placement). */
+    float off[3] = {0, 0, 0};
+    model_recenter_upload_off(meshes, sub, off);
+
+    G3DModel *model = (G3DModel *)calloc(1, sizeof(G3DModel));
+    if (!model) { free(meshes); free(textures); cgltf_free(data); return NULL; }
+    model->meshes = meshes;
+    model->mesh_count = (uint32_t)sub;
+    model->mesh_textures = textures;
+    model->albedo_texture = textures[0];
+    strncpy(model->filepath, filepath, sizeof(model->filepath) - 1);
+
+    printf("G3D: glTF loaded (fractured): %s (%d chunks, materials=%d)\n",
+           filepath, sub, mc);
 
     cgltf_free(data);
     return model;

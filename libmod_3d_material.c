@@ -7,16 +7,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-static G3DMaterial g_materials[256];
+#define G3D_MAX_MATERIALS 4096
+static G3DMaterial g_materials[G3D_MAX_MATERIALS];
 static int g_material_count = 0;
 
 int g3d_material_impl_create(void) {
-    if (g_material_count >= 256) {
-        fprintf(stderr, "G3D: Max materials reached\n");
-        return -1;
+    /* Reuse a freed slot first so long-running games that spawn/despawn a lot
+       (particles, fracture chunks, projectiles) don't exhaust the pool. */
+    int material_id = -1;
+    for (int i = 0; i < g_material_count; i++) {
+        if (!g_materials[i].active) { material_id = i; break; }
     }
-
-    int material_id = g_material_count++;
+    if (material_id < 0) {
+        if (g_material_count >= G3D_MAX_MATERIALS) {
+            fprintf(stderr, "G3D: Max materials reached\n");
+            return -1;
+        }
+        material_id = g_material_count++;
+    }
     G3DMaterial *mat = &g_materials[material_id];
 
     memset(mat, 0, sizeof(G3DMaterial));
@@ -36,7 +44,6 @@ int g3d_material_impl_create(void) {
 
     snprintf(mat->name, 63, "Material_%d", material_id);
 
-    printf("G3D: Material created: id=%d\n", material_id);
     return material_id;
 }
 
@@ -50,7 +57,6 @@ int g3d_material_impl_destroy(int material_id) {
         return 0;
 
     mat->active = 0;
-    printf("G3D: Material destroyed: id=%d\n", material_id);
     return 1;
 }
 

@@ -27,6 +27,11 @@ int g3d_scene_load(const char *file);
 float g3d_scene_terrain_height(float x, float z);
 float g3d_scene_water_level(void);
 
+/* Raw heightmap of the loaded scene (for a physics engine to build a collision
+   height field). H is row-major H[iz*side+ix], covering world [-ws/2,ws/2] on
+   X/Z. Returns 0 if the scene has no heightmap. */
+int   g3d_scene_heightfield(const float **H, int *side, float *world_size);
+
 /* Player spawn point placed in the editor (SPAWN directive). */
 int   g3d_scene_has_spawn(void);
 float g3d_scene_spawn_x(void);

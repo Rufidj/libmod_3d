@@ -63,6 +63,14 @@ float g3d_scene_terrain_height(float x, float z) {
     return g3d_heightfield_height(g_scene_H, g_scene_side, g_scene_ws, x, z);
 }
 
+int g3d_scene_heightfield(const float **H, int *side, float *world_size) {
+    if (!g_scene_H || g_scene_side <= 1) return 0;
+    if (H) *H = g_scene_H;
+    if (side) *side = g_scene_side;
+    if (world_size) *world_size = g_scene_ws;
+    return 1;
+}
+
 /* Water surface level of the last-loaded scene (first lake / global water), or a
    very negative value if the scene has no water. */
 float g3d_scene_water_level(void) {

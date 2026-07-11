@@ -4,20 +4,29 @@
 
 #include "libmod_3d_entity.h"
 #include "libmod_3d_scene.h"
+#include "libmod_3d_material.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-static G3DEntity g_entities[4096];
+#define G3D_MAX_ENTITIES 16384
+static G3DEntity g_entities[G3D_MAX_ENTITIES];
 static int g_entity_count = 0;
 
 int g3d_entity_impl_spawn(int scene_id, int model_id, float x, float y, float z) {
-    if (g_entity_count >= 4096) {
-        fprintf(stderr, "G3D: Max entities reached\n");
-        return -1;
+    /* Reuse a freed slot first (long-running games spawn/despawn constantly:
+       projectiles, fracture chunks, particles). */
+    int entity_id = -1;
+    for (int i = 0; i < g_entity_count; i++) {
+        if (!g_entities[i].active) { entity_id = i; break; }
     }
-
-    int entity_id = g_entity_count++;
+    if (entity_id < 0) {
+        if (g_entity_count >= G3D_MAX_ENTITIES) {
+            fprintf(stderr, "G3D: Max entities reached\n");
+            return -1;
+        }
+        entity_id = g_entity_count++;
+    }
     G3DEntity *entity = &g_entities[entity_id];
 
     memset(entity, 0, sizeof(G3DEntity));
@@ -39,7 +48,6 @@ int g3d_entity_impl_spawn(int scene_id, int model_id, float x, float y, float z)
 
     snprintf(entity->name, 63, "Entity_%d", entity_id);
 
-    printf("G3D: Entity spawned: id=%d, pos=(%.2f, %.2f, %.2f)\n", entity_id, x, y, z);
     return entity_id;
 }
 
@@ -56,8 +64,30 @@ int g3d_entity_impl_destroy(int entity_id) {
     g3d_scene_impl_remove_entity(entity->scene_id, entity_id);
 
     entity->active = 0;
+    return 1;
+}
 
-    printf("G3D: Entity destroyed: id=%d\n", entity_id);
+/* Destroy an entity and everything parented under it (recursively). If
+   free_materials != 0 each destroyed entity's material is also released - use
+   this for models spawned by g3d_model_spawn, whose per-submesh materials are
+   private to that spawn. */
+int g3d_entity_impl_destroy_tree(int root_id, int free_materials) {
+    if (root_id < 0 || root_id >= g_entity_count)
+        return 0;
+    if (!g_entities[root_id].active)
+        return 0;
+
+    /* Children first (scan the whole live range; parenting is shallow here). */
+    for (int i = 0; i < g_entity_count; i++) {
+        if (g_entities[i].active && g_entities[i].parent_id == root_id)
+            g3d_entity_impl_destroy_tree(i, free_materials);
+    }
+
+    G3DEntity *entity = &g_entities[root_id];
+    if (free_materials && entity->material_id >= 0)
+        g3d_material_impl_destroy(entity->material_id);
+    g3d_scene_impl_remove_entity(entity->scene_id, root_id);
+    entity->active = 0;
     return 1;
 }
 

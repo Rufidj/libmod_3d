@@ -204,6 +204,15 @@ int64_t g3d_entity_destroy_bgd(INSTANCE *my, int64_t *params) {
     return g3d_entity_impl_destroy(entity_id);
 }
 
+/* Despawn a model spawned with g3d_model_spawn: destroys the root, all its
+   submesh children and releases their private materials. Also works on a
+   single entity+material (e.g. a fracture chunk). Use this to avoid leaking
+   entity/material pool slots when spawning/despawning constantly. */
+int64_t g3d_model_despawn_bgd(INSTANCE *my, int64_t *params) {
+    int root_id = (int)params[0];
+    return g3d_entity_impl_destroy_tree(root_id, 1);
+}
+
 int64_t g3d_entity_set_position_bgd(INSTANCE *my, int64_t *params) {
     int entity_id = (int)params[0];
     float x = *(float *)&params[1];
@@ -493,6 +502,16 @@ int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params) {
     return (int64_t)(intptr_t)model;
 }
 
+int64_t g3d_model_load_gltf_fractured_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
+    const char *filename = (const char *)string_get(params[0]);
+    G3DModel *model = g3d_gltf_load_fractured(filename);
+    string_discard(params[0]);
+    if (!model)
+        return -1;
+    return (int64_t)(intptr_t)model;
+}
+
 int64_t g3d_model_load_obj_bgd(INSTANCE *my, int64_t *params) {
     g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
@@ -685,6 +704,44 @@ int64_t g3d_model_submesh_texture_bgd(INSTANCE *my, int64_t *params) {
         !model->mesh_textures[i])
         return -1;
     return (int64_t)(intptr_t)model->mesh_textures[i];
+}
+
+/* Per-submesh AABB in model space (centre + half-extents), for fracture chunks:
+   each chunk = one submesh -> its own rigid body sized/placed from these. */
+static float g3d_submesh_aabb(void *mp, int i, int comp, int half) {
+    G3DModel *m = (G3DModel *)mp;
+    if (!m || i < 0 || i >= (int)m->mesh_count) return 0.0f;
+    float lo = m->meshes[i].aabb_min[comp], hi = m->meshes[i].aabb_max[comp];
+    return half ? (hi - lo) * 0.5f : (hi + lo) * 0.5f;
+}
+/* Expose a submesh's CPU vertex positions (+ triangle indices) so the physics
+   backend can build convex hulls and static mesh colliders. Returns the vertex
+   count (0 on failure); *pos -> first position, *stride_floats = floats between
+   consecutive vertices. Declared in libmod_3d_physics.h and used by the Jolt
+   backend. */
+int g3d_physics_submesh_geom(void *mp, int i, const float **pos, int *stride_floats,
+                             const unsigned int **indices, int *icount) {
+    G3DModel *m = (G3DModel *)mp;
+    if (!m || i < 0 || i >= (int)m->mesh_count) return 0;
+    G3DMesh *mesh = &m->meshes[i];
+    if (!mesh->vertices || mesh->vertex_count == 0) return 0;
+    if (pos)           *pos = mesh->vertices[0].position;
+    if (stride_floats) *stride_floats = (int)(sizeof(G3DVertex) / sizeof(float));
+    if (indices)       *indices = mesh->indices;
+    if (icount)        *icount = (int)mesh->index_count;
+    return (int)mesh->vertex_count;
+}
+
+int64_t g3d_model_submesh_cx_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 0, 0); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_cy_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 1, 0); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_cz_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 2, 0); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_hx_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 0, 1); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_hy_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 1, 1); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_hz_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 2, 1); return (int64_t)*(int32_t*)&v; }
+
+int64_t g3d_rigidbody_set_model_offset_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_model_offset((int)params[0], *(float*)&params[1], *(float*)&params[2], *(float*)&params[3]);
+    return 1;
 }
 
 /* Spawn a whole model (all submeshes) under one empty root entity; returns the
@@ -1581,6 +1638,31 @@ int64_t g3d_rigidbody_create_bgd(INSTANCE *my, int64_t *params) {
     return g3d_rigidbody_create(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
                                 *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
                                 *(float *)&params[6]);
+}
+int64_t g3d_rigidbody_create_sphere_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_sphere(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                       *(float *)&params[3], *(float *)&params[4]);
+}
+int64_t g3d_rigidbody_create_capsule_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_capsule(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                        *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+}
+int64_t g3d_rigidbody_create_cylinder_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_cylinder(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                         *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+}
+int64_t g3d_rigidbody_create_convex_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_convex(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                       (void *)(intptr_t)params[3], (int)params[4],
+                                       *(float *)&params[5], *(float *)&params[6]);
+}
+int64_t g3d_rigidbody_set_ccd_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_ccd((int)params[0], (int)params[1]); return 1;
+}
+int64_t g3d_collider_add_mesh_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_collider_add_mesh((void *)(intptr_t)params[0], (int)params[1],
+                                 *(float *)&params[2], *(float *)&params[3],
+                                 *(float *)&params[4], *(float *)&params[5]);
 }
 int64_t g3d_rigidbody_destroy_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_destroy((int)params[0]); return 1; }
 int64_t g3d_rigidbody_clear_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_clear(); return 1; }

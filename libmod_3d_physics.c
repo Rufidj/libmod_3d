@@ -82,7 +82,15 @@ float g3d_char_y(int id) { return (id>=0 && id<MAX_CHARS && g_chars[id].active) 
 float g3d_char_z(int id) { return (id>=0 && id<MAX_CHARS && g_chars[id].active) ? g_chars[id].pz : 0.0f; }
 int   g3d_char_grounded(int id) { return (id>=0 && id<MAX_CHARS && g_chars[id].active) ? g_chars[id].grounded : 0; }
 
-void g3d_physics_set_gravity(float g) { g_gravity = g; }
+#ifdef USE_JOLT
+void g3d_jolt_set_gravity(float g);   /* forward to the Jolt backend */
+#endif
+void g3d_physics_set_gravity(float g) {
+    g_gravity = g;                    /* char controller + vehicle (always custom) */
+#ifdef USE_JOLT
+    g3d_jolt_set_gravity(g);          /* rigid bodies (Jolt) */
+#endif
+}
 
 int g3d_collider_add_box(float minx, float miny, float minz,
                          float maxx, float maxy, float maxz) {
@@ -369,6 +377,7 @@ void g3d_char_update(int id, float dt) {
     }
 }
 
+#ifndef USE_JOLT   /* Jolt backend (libmod_3d_jolt.cpp) replaces this whole section */
 /* ========================================================================= */
 /*  rigid bodies (AABB boxes: fall, stack, collide, get pushed)               */
 /*  Reuses the same static box colliders (g_boxes), terrain and gravity.      */
@@ -386,6 +395,7 @@ typedef struct {
     Quat  orient;            /* orientation (free tumble in the air)           */
     float avx, avy, avz;     /* angular velocity (rad/s)                       */
     float inv_inertia;       /* scalar inverse inertia (box approximation)     */
+    float ox, oy, oz;        /* body-centre -> model-origin offset (render)    */
     int   grounded;
     int   active;
 } G3DBody;
@@ -408,6 +418,7 @@ int g3d_rigidbody_create(float x, float y, float z,
         b->orient = quat_identity();
         b->inv_inertia = b->inv_mass > 0.0f
                        ? b->inv_mass * 2.5f / (b->hx*b->hx + b->hy*b->hy + b->hz*b->hz) : 0.0f;
+        b->ox = 0.0f; b->oy = b->hy; b->oz = 0.0f;   /* default: bottom-origin model */
         b->active = 1;
         return i;
     }
@@ -450,9 +461,14 @@ float g3d_rigidbody_angle_z(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].act
 /* Placement for a bottom-origin model (feet at the model origin, e.g. loaded via
    g3d_model_spawn): centre - R*(0,hy,0). Puts the model's centre at the body
    centre so it rests on the ground AND tumbles about its centre. */
-float g3d_rigidbody_render_x(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].active)return 0.0f; G3DBody*b=&g_bodies[id]; Vec3 o=quat_rotate_vec3(b->orient, vec3_make(0.0f,b->hy,0.0f)); return b->px - o.x; }
-float g3d_rigidbody_render_y(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].active)return 0.0f; G3DBody*b=&g_bodies[id]; Vec3 o=quat_rotate_vec3(b->orient, vec3_make(0.0f,b->hy,0.0f)); return b->py - o.y; }
-float g3d_rigidbody_render_z(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].active)return 0.0f; G3DBody*b=&g_bodies[id]; Vec3 o=quat_rotate_vec3(b->orient, vec3_make(0.0f,b->hy,0.0f)); return b->pz - o.z; }
+float g3d_rigidbody_render_x(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].active)return 0.0f; G3DBody*b=&g_bodies[id]; Vec3 o=quat_rotate_vec3(b->orient, vec3_make(b->ox,b->oy,b->oz)); return b->px - o.x; }
+float g3d_rigidbody_render_y(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].active)return 0.0f; G3DBody*b=&g_bodies[id]; Vec3 o=quat_rotate_vec3(b->orient, vec3_make(b->ox,b->oy,b->oz)); return b->py - o.y; }
+float g3d_rigidbody_render_z(int id) { if(id<0||id>=MAX_BODIES||!g_bodies[id].active)return 0.0f; G3DBody*b=&g_bodies[id]; Vec3 o=quat_rotate_vec3(b->orient, vec3_make(b->ox,b->oy,b->oz)); return b->pz - o.z; }
+
+void g3d_rigidbody_set_model_offset(int id, float ox, float oy, float oz) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    g_bodies[id].ox = ox; g_bodies[id].oy = oy; g_bodies[id].oz = oz;
+}
 
 /* World-aligned half-extents of the oriented box (its bounding box). Lets the
    collision follow the orientation, so a barrel on its side rests at its real
@@ -619,3 +635,26 @@ void g3d_rigidbody_step(float dt) {
         if (wl > 24.0f) { float s = 24.0f/wl; b->avx*=s; b->avy*=s; b->avz*=s; }
     }
 }
+
+/* Tier-1 shapes/CCD/mesh-collider are Jolt-only. Provide fallbacks so the
+   module still builds and links without USE_JOLT (sphere/capsule/cylinder map
+   to the existing box body; convex/mesh degrade gracefully). */
+int g3d_rigidbody_create_sphere(float x, float y, float z, float radius, float mass) {
+    return g3d_rigidbody_create(x, y, z, radius, radius, radius, mass);
+}
+int g3d_rigidbody_create_capsule(float x, float y, float z, float radius, float half_height, float mass) {
+    return g3d_rigidbody_create(x, y, z, radius, half_height + radius, radius, mass);
+}
+int g3d_rigidbody_create_cylinder(float x, float y, float z, float radius, float half_height, float mass) {
+    return g3d_rigidbody_create(x, y, z, radius, half_height, radius, mass);
+}
+int g3d_rigidbody_create_convex(float x, float y, float z, void *model, int submesh, float scale, float mass) {
+    (void)model; (void)submesh; (void)scale; (void)x; (void)y; (void)z; (void)mass;
+    return -1;   /* no convex hulls without Jolt; caller falls back to a box */
+}
+void g3d_rigidbody_set_ccd(int id, int enabled) { (void)id; (void)enabled; }
+int  g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, float scale) {
+    (void)model; (void)submesh; (void)x; (void)y; (void)z; (void)scale; return -1;
+}
+
+#endif /* !USE_JOLT */
