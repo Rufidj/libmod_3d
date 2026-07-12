@@ -756,6 +756,36 @@ int64_t g3d_rigidbody_set_model_offset_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+/* Merge ALL of a model's submeshes into one mesh (positions scaled by s), then
+   decimate it -> a single low-poly mesh for the far-LOD of detailed multi-part
+   models (e.g. a 61-submesh ship: 61 draws -> 1 far away). One texture only
+   (the model albedo); fine at distance. Returns NULL if not worth it. */
+static G3DMesh *build_model_merged_lod(G3DModel *model, float s) {
+    if (!model || model->mesh_count < 4) return NULL;
+    uint32_t tv = 0, ti = 0;
+    for (uint32_t i = 0; i < model->mesh_count; i++) { tv += model->meshes[i].vertex_count; ti += model->meshes[i].index_count; }
+    if (tv < 48 || ti < 3) return NULL;
+    G3DVertex *verts = (G3DVertex *)malloc((size_t)tv * sizeof(G3DVertex));
+    uint32_t *idx = (uint32_t *)malloc((size_t)ti * sizeof(uint32_t));
+    if (!verts || !idx) { free(verts); free(idx); return NULL; }
+    uint32_t vo = 0, io = 0;
+    for (uint32_t i = 0; i < model->mesh_count; i++) {
+        G3DMesh *sm = &model->meshes[i];
+        for (uint32_t v = 0; v < sm->vertex_count; v++) {
+            verts[vo + v] = sm->vertices[v];
+            verts[vo + v].position[0] *= s; verts[vo + v].position[1] *= s; verts[vo + v].position[2] *= s;
+        }
+        for (uint32_t k = 0; k < sm->index_count; k++) idx[io + k] = sm->indices[k] + vo;
+        vo += sm->vertex_count; io += sm->index_count;
+    }
+    G3DMesh *merged = g3d_mesh_create("merged", verts, tv, idx, ti);
+    free(verts); free(idx);
+    if (!merged) return NULL;
+    G3DMesh *lod = g3d_mesh_simplify(merged, 16);   /* decimate the whole thing */
+    g3d_mesh_free(merged);
+    return lod;
+}
+
 /* Spawn a whole model (all submeshes) under one empty root entity; returns the
    root id. Move/rotate/scale the root to move the entire model. */
 int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
@@ -797,6 +827,37 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
         g3d_entity_impl_set_material(ent, mat);
         g3d_entity_impl_set_scale(ent, s, s, s);
         g3d_entity_impl_set_parent(ent, root);               /* child of the root -> moves with it */
+    }
+
+    /* Far-LOD: one merged, decimated mesh drawn (with the model albedo) instead
+       of all the submesh children when the model is beyond g3d_set_lod distance. */
+    G3DMesh *mlod = build_model_merged_lod(model, s);
+    if (mlod) {
+        G3DEntity *re = g3d_entity_impl_get(root);
+        if (re) {
+            re->lod_mesh = mlod;
+            int lmat = g3d_material_impl_create();
+            G3DMaterial *lm = g3d_material_impl_get(lmat);
+            if (lm) {
+                /* The merged mesh mixes many UV spaces, so a single texture can't
+                   map right -> flat-shade it with the AVERAGE colour of the model's
+                   main texture (clean coloured low-poly instead of white). */
+                lm->albedo_texture = NULL;
+                lm->albedo_texture_id = -1;
+                unsigned long long r = 0, g = 0, b = 0, n = 0;
+                if (model->mesh_textures) {
+                    for (uint32_t i = 0; i < model->mesh_count; i++) {
+                        G3DTexture *t = (G3DTexture *)model->mesh_textures[i];
+                        if (!t || !t->data || t->data_size < 4) continue;
+                        int ch = (t->channels >= 3) ? (int)t->channels : 4;
+                        size_t step = (size_t)ch * 16;   /* sparse sample: fast + representative */
+                        for (size_t p = 0; p + 2 < t->data_size; p += step) { r += t->data[p]; g += t->data[p+1]; b += t->data[p+2]; n++; }
+                    }
+                }
+                if (n) { lm->color[0] = (float)r/n/255.0f; lm->color[1] = (float)g/n/255.0f; lm->color[2] = (float)b/n/255.0f; lm->color[3] = 1.0f; }
+            }
+            re->lod_material = lmat;
+        }
     }
     return root;
 }
@@ -1137,6 +1198,10 @@ int64_t g3d_instances_set_wind_bgd(INSTANCE *my, int64_t *params) {
 }
 int64_t g3d_instances_set_alpha_cut_bgd(INSTANCE *my, int64_t *params) {
     g3d_instances_set_alpha_cut((int)params[0], (int)params[1]);
+    return 1;
+}
+int64_t g3d_set_lod_bgd(INSTANCE *my, int64_t *params) {
+    g3d_instances_set_lod_distance(*(float *)&params[0]);
     return 1;
 }
 

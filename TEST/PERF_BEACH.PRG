@@ -90,11 +90,7 @@ BEGIN
             heading = heading + 180;
         END
         wy = g3d_scene_terrain_height(wx, wz);
-        IF (dist2cam(wx, wy, wz) < LOD_DIST * LOD_DIST)
-            FOR (j = 0; j < tnsub; j = j + 1) g3d_instances_add(tgrp[base + j], wx, wy, wz, heading, tscale); END
-        ELSE
-            FOR (j = 0; j < tnsub; j = j + 1) g3d_instances_add(tlod[j], wx, wy, wz, heading, tscale); END
-        END
+        FOR (j = 0; j < tnsub; j = j + 1) g3d_instances_add(tgrp[base + j], wx, wy, wz, heading, tscale); END
         IF (quit) BREAK; END
         FRAME;
     END
@@ -116,11 +112,7 @@ BEGIN
             heading = heading + 180;
         END
         wy = g3d_scene_terrain_height(wx, wz);
-        IF (dist2cam(wx, wy, wz) < LOD_DIST * LOD_DIST)
-            FOR (j = 0; j < cnsub; j = j + 1) g3d_instances_add(cgrp[base + j], wx, wy, wz, heading + 90.0, cscale); END
-        ELSE
-            FOR (j = 0; j < cnsub; j = j + 1) g3d_instances_add(clod[j], wx, wy, wz, heading + 90.0, cscale); END
-        END
+        FOR (j = 0; j < cnsub; j = j + 1) g3d_instances_add(cgrp[base + j], wx, wy, wz, heading + 90.0, cscale); END
         IF (quit) BREAK; END
         FRAME;
     END
@@ -136,11 +128,7 @@ BEGIN
         a = a + spd;
         gx = cx + cos(a * 1000) * radius; gz = cz + sin(a * 1000) * radius;
         gy = alt + 4.0 * sin((a * 3.0) * 1000);
-        IF (dist2cam(gx, gy, gz) < LOD_DIST * LOD_DIST)
-            FOR (j = 0; j < gnsub; j = j + 1) g3d_instances_add(ggrp[base + j], gx, gy, gz, a + 90.0, gscale); END
-        ELSE
-            FOR (j = 0; j < gnsub; j = j + 1) g3d_instances_add(glod[j], gx, gy, gz, a + 90.0, gscale); END
-        END
+        FOR (j = 0; j < gnsub; j = j + 1) g3d_instances_add(ggrp[base + j], gx, gy, gz, a + 90.0, gscale); END
         IF (quit) BREAK; END
         FRAME;
     END
@@ -175,11 +163,7 @@ BEGIN
         fx = cx + cos(a * 1000) * radius;
         fz = cz + sin(a * 1000) * radius;
         fy = depth + 0.8 * sin((a * 2.0) * 1000);   // ondeo vertical suave
-        IF (dist2cam(fx, fy, fz) < LOD_DIST * LOD_DIST)   // cerca = skinned
-            IF (ftype == 0) grp = gugrp[herd]; ELSE grp = dogrp[herd]; END
-        ELSE                                              // lejos = LOD1 estatico
-            IF (ftype == 0) grp = gulod; ELSE grp = dolod; END
-        END
+        IF (ftype == 0) grp = gugrp[herd]; ELSE grp = dogrp[herd]; END
         IF (ftype == 0)
             g3d_instances_add(grp, fx, fy, fz, a + 90.0, guscale);
         ELSE
@@ -230,7 +214,7 @@ BEGIN
     NH_FISHG = 4; N_GUPPY = 100;   // guppy
     NH_FISHD = 4; N_DORADA = 70;   // dorada
     N_PLANES = 3;
-    LOD_DIST = 60.0;   // criaturas lejanas -> LOD1 estatico (sin skinning) = mas FPS
+    g3d_set_lod(200.0);   // LOD AUTOMATICO del motor: todo objeto instanciado mas alla de 60u -> low-poly. Sin mas codigo.
 
     scene = g3d_scene_load("demo_beach.scene");
     IF (scene < 0) say("ERROR cargando demo_beach.scene"); RETURN; END
@@ -288,10 +272,6 @@ BEGIN
     FOR (h = 0; h < NH_GULL; h = h + 1)
         FOR (j = 0; j < gnsub; j = j + 1) ggrp[h*gnsub+j] = g3d_instances_create_skinned(g3d_model_submesh(gm[h], j), g3d_model_submesh_texture(gm[h], j), gm[h]); g3d_instances_set_distance(ggrp[h*gnsub+j], 600.0); END
     END
-    // ---- grupos LOD1 (simplificado, compartido por tipo) ----
-    FOR (j = 0; j < tnsub; j = j + 1) tlod[j] = g3d_instances_create(g3d_model_submesh_lod(tm[0], j, 10), g3d_model_submesh_texture(tm[0], j)); g3d_instances_set_distance(tlod[j], 600.0); END
-    FOR (j = 0; j < cnsub; j = j + 1) clod[j] = g3d_instances_create(g3d_model_submesh_lod(cm[0], j, 10), g3d_model_submesh_texture(cm[0], j)); g3d_instances_set_distance(clod[j], 600.0); END
-    FOR (j = 0; j < gnsub; j = j + 1) glod[j] = g3d_instances_create(g3d_model_submesh_lod(gm[0], j, 8),  g3d_model_submesh_texture(gm[0], j)); g3d_instances_set_distance(glod[j], 600.0); END
 
     // ---- peces (guppy + dorada): skinned instancing, 1 submesh ----
     FOR (h = 0; h < NH_FISHG; h = h + 1) gum[h] = g3d_load_gltf("assets/guppy.glb"); g3d_model_set_gpu_skin(gum[h], 1); END
@@ -300,9 +280,6 @@ BEGIN
     doscale = 1.6 / g3d_model_height(dom[0]);   // dorada ~1.6u
     FOR (h = 0; h < NH_FISHG; h = h + 1) gugrp[h] = g3d_instances_create_skinned(g3d_model_submesh(gum[h], 0), g3d_model_submesh_texture(gum[h], 0), gum[h]); g3d_instances_set_distance(gugrp[h], 600.0); END
     FOR (h = 0; h < NH_FISHD; h = h + 1) dogrp[h] = g3d_instances_create_skinned(g3d_model_submesh(dom[h], 0), g3d_model_submesh_texture(dom[h], 0), dom[h]); g3d_instances_set_distance(dogrp[h], 600.0); END
-    // LOD1 de peces (simplificado, estatico, compartido) -> peces lejanos sin skinning
-    gulod = g3d_instances_create(g3d_model_submesh_lod(gum[0], 0, 8), g3d_model_submesh_texture(gum[0], 0)); g3d_instances_set_distance(gulod, 600.0);
-    dolod = g3d_instances_create(g3d_model_submesh_lod(dom[0], 0, 8), g3d_model_submesh_texture(dom[0], 0)); g3d_instances_set_distance(dolod, 600.0);
     // ---- avioneta: ESTATICA (sin skinning: barato y la bind pose ya es correcta).
     //      Solo submesh 0 (cuerpo texturado); ignora outline/blur del modelo toon. ----
     mplane = g3d_load_gltf("assets/avioneta.glb");
@@ -347,12 +324,8 @@ BEGIN
         FOR (i = 0; i < NH_TRIBU * tnsub; i = i + 1) g3d_instances_clear(tgrp[i]); END
         FOR (i = 0; i < NH_CRAB  * cnsub; i = i + 1) g3d_instances_clear(cgrp[i]); END
         FOR (i = 0; i < NH_GULL  * gnsub; i = i + 1) g3d_instances_clear(ggrp[i]); END
-        FOR (i = 0; i < tnsub; i = i + 1) g3d_instances_clear(tlod[i]); END
-        FOR (i = 0; i < cnsub; i = i + 1) g3d_instances_clear(clod[i]); END
-        FOR (i = 0; i < gnsub; i = i + 1) g3d_instances_clear(glod[i]); END
         FOR (i = 0; i < NH_FISHG; i = i + 1) g3d_instances_clear(gugrp[i]); END
         FOR (i = 0; i < NH_FISHD; i = i + 1) g3d_instances_clear(dogrp[i]); END
-        g3d_instances_clear(gulod); g3d_instances_clear(dolod);
         FOR (i = 0; i < plnsub; i = i + 1) g3d_instances_clear(plgrp[i]); END
 
         IF (fanim)

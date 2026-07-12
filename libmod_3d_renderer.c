@@ -1189,12 +1189,34 @@ void g3d_renderer_forward_pass(void) {
         if (!entity || !entity->active)
             continue;
 
-        /* Skip entities without a mesh assigned */
+        /* Get entity's world matrix */
+        Mat4 world_matrix = g3d_entity_impl_get_world_matrix(entity_id);
+        float lodd = g3d_instances_get_lod_distance();
+
+        /* Model far-LOD root: when the whole model is far, draw ONE merged +
+           decimated mesh instead of all its submesh children. */
+        if (entity->lod_mesh && lodd > 0.0f) {
+            float ex = world_matrix.m[12] - camera->position.x;
+            float ey = world_matrix.m[13] - camera->position.y;
+            float ez = world_matrix.m[14] - camera->position.z;
+            entity->lod_far = (ex*ex + ey*ey + ez*ez > lodd * lodd) ? 1 : 0;
+            if (entity->lod_far) {
+                G3DMaterial *lmat = (entity->lod_material >= 0) ? g3d_material_impl_get(entity->lod_material) : NULL;
+                g3d_renderer_render_mesh(entity->lod_mesh, lmat, world_matrix, mat4_identity());
+                continue;
+            }
+        }
+
+        /* Skip entities without a mesh assigned (e.g. a near model root) */
         if (!entity->mesh)
             continue;
 
-        /* Get entity's world matrix */
-        Mat4 world_matrix = g3d_entity_impl_get_world_matrix(entity_id);
+        /* Child of a model root that is drawing its merged far-LOD -> skip. */
+        if (entity->parent_id >= 0) {
+            G3DEntity *par = g3d_entity_impl_get(entity->parent_id);
+            if (par && par->lod_far)
+                continue;
+        }
 
         /* Frustum culling: transform the mesh AABB's 8 corners to world space,
            build a world AABB and test it against the camera frustum. */
@@ -1227,9 +1249,20 @@ void g3d_renderer_forward_pass(void) {
             material = g3d_material_impl_get(entity->material_id);
         }
 
+        /* Automatic LOD: far entities render their auto-generated low-poly mesh.
+           Same global g3d_set_lod distance as instanced objects; no game code. */
+        void *drawmesh = entity->mesh;
+        if (lodd > 0.0f) {
+            float ex = world_matrix.m[12] - camera->position.x;
+            float ey = world_matrix.m[13] - camera->position.y;
+            float ez = world_matrix.m[14] - camera->position.z;
+            if (ex*ex + ey*ey + ez*ez > lodd * lodd)
+                drawmesh = g3d_mesh_lod((G3DMesh *)entity->mesh);
+        }
+
         /* Render the entity's mesh (render_mesh recomputes the normal matrix
            from the model matrix internally) */
-        g3d_renderer_render_mesh(entity->mesh, material, world_matrix,
+        g3d_renderer_render_mesh(drawmesh, material, world_matrix,
                                  mat4_identity());
     }
 }

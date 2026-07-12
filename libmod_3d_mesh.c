@@ -291,6 +291,16 @@ G3DMesh *g3d_mesh_simplify(const G3DMesh *src, int grid) {
     return out;
 }
 
+/* Cached low-poly LOD, generated on first use. Returns the mesh itself if it is
+   too small to bother simplifying, so callers can always use the result. */
+G3DMesh *g3d_mesh_lod(G3DMesh *mesh) {
+    if (!mesh) return NULL;
+    if (mesh->lod) return (G3DMesh *)mesh->lod;
+    G3DMesh *l = (mesh->vertex_count >= 48) ? g3d_mesh_simplify(mesh, 12) : NULL;
+    mesh->lod = l ? l : mesh;   /* cache (self if not simplifiable) */
+    return (G3DMesh *)mesh->lod;
+}
+
 /* ============================================================================
    CLEANUP
    ============================================================================

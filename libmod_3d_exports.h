@@ -177,6 +177,7 @@ int64_t g3d_model_set_gpu_skin_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_submesh_lod_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_set_wind_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_set_alpha_cut_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_lod_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_set_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_count_bgd(INSTANCE *my, int64_t *params);
@@ -471,6 +472,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_MODEL_SUBMESH_LOD", "III", TYPE_INT, g3d_model_submesh_lod_bgd),
     FUNC("G3D_INSTANCES_SET_WIND", "IF", TYPE_INT, g3d_instances_set_wind_bgd),
     FUNC("G3D_INSTANCES_SET_ALPHA_CUT", "II", TYPE_INT, g3d_instances_set_alpha_cut_bgd),
+    FUNC("G3D_SET_LOD", "F", TYPE_INT, g3d_set_lod_bgd),
     FUNC("G3D_INSTANCES_SET_DISTANCE", "IF", TYPE_INT, g3d_instances_set_distance_bgd),
     FUNC("G3D_INSTANCES_CLEAR", "I", TYPE_INT, g3d_instances_clear_bgd),
     FUNC("G3D_INSTANCES_COUNT", "I", TYPE_INT, g3d_instances_count_bgd),
