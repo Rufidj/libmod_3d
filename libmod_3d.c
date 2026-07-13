@@ -36,6 +36,21 @@
 #include <SDL.h>
 #include "SDL_gpu.h"
 #include "xstrings.h"
+
+/* libbggfx already EXPORTS its process-local table (alpha, color_r/g/b, ...).
+   We only READ it from here (no BennuGD2 source is modified) so 3D entities can
+   obey the same `alpha`/`color_*` locals the 2D painter uses. Looked up by NAME
+   to stay robust to enum order. */
+extern DLVARFIXUP libbggfx_locals_fixup[];
+
+static uint8_t *bggfx_local_byte(INSTANCE *my, const char *name) {
+    if (!my || !my->locdata) return NULL;
+    for (int i = 0; libbggfx_locals_fixup[i].var; i++)
+        if (strcmp(libbggfx_locals_fixup[i].var, name) == 0)
+            return (uint8_t *)(intptr_t)my->locdata
+                 + (uint64_t)(intptr_t)libbggfx_locals_fixup[i].data_offset;
+    return NULL;
+}
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -257,6 +272,48 @@ int64_t g3d_entity_set_material_bgd(INSTANCE *my, int64_t *params) {
     int material_id = (int)params[1];
     return g3d_entity_impl_set_material(entity_id, material_id);
 }
+
+/* Opacity from BennuGD's 0..255 `alpha` convention (255 = opaque). Applies to
+   the whole model tree. Pass your process' `alpha` local straight in. */
+int64_t g3d_entity_set_alpha_bgd(INSTANCE *my, int64_t *params) {
+    int entity_id = (int)params[0];
+    float a = (float)params[1] / 255.0f;
+    return g3d_entity_impl_set_alpha(entity_id, a);
+}
+
+/* RGB tint from BennuGD's 0..255 color convention (255,255,255 = no tint). */
+int64_t g3d_entity_set_color_bgd(INSTANCE *my, int64_t *params) {
+    int entity_id = (int)params[0];
+    return g3d_entity_impl_set_color(entity_id, (float)params[1] / 255.0f,
+                                     (float)params[2] / 255.0f,
+                                     (float)params[3] / 255.0f);
+}
+
+/* Blend mode, using BennuGD's blend_mode constants (BLEND_NORMAL, BLEND_ADD,
+   BLEND_MULTIPLY, BLEND_SUBTRACT). Applies to the whole model tree. */
+int64_t g3d_entity_set_blend_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_entity_impl_set_blend((int)params[0], (int)params[1]);
+}
+
+/* Make the entity obey the CALLING process' own reserved locals - the SAME
+   `alpha` / `color_r,g,b` / `blend_mode` the 2D painter reads. Call it each frame
+   from the process that owns the entity and the 3D model follows its
+   alpha/colour/blend with zero extra bookkeeping:  g3d_entity_use_locals(myent); */
+int64_t g3d_entity_use_locals_bgd(INSTANCE *my, int64_t *params) {
+    int entity_id = (int)params[0];
+    uint8_t *a = bggfx_local_byte(my, "alpha");
+    uint8_t *r = bggfx_local_byte(my, "color_r");
+    uint8_t *g = bggfx_local_byte(my, "color_g");
+    uint8_t *b = bggfx_local_byte(my, "color_b");
+    int64_t *bm = (int64_t *)bggfx_local_byte(my, "blendmode");
+    if (a) g3d_entity_impl_set_alpha(entity_id, (float)(*a) / 255.0f);
+    if (r && g && b)
+        g3d_entity_impl_set_color(entity_id, (float)(*r) / 255.0f,
+                                  (float)(*g) / 255.0f, (float)(*b) / 255.0f);
+    if (bm) g3d_entity_impl_set_blend(entity_id, (int)(*bm));
+    return 1;
+}
+
 
 int64_t g3d_entity_set_parent_bgd(INSTANCE *my, int64_t *params) {
     int entity_id = (int)params[0];

@@ -179,6 +179,7 @@ void g3d_renderer_resolve_hdr(void);                    /* resolve HDR+bloom (+A
 void g3d_renderer_set_wireframe_mode(int enabled);
 void g3d_renderer_set_frustum_culling(int enabled);
 void g3d_renderer_set_backface_cull(int enabled);
+void g3d_renderer_transparent_pass(void);
 
 /* Begin frame (clear buffers, reset stats) */
 void g3d_renderer_begin_frame(void);

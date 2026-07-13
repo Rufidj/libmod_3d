@@ -441,6 +441,8 @@ uniform vec3 uCameraPosition;
 uniform vec3 uAmbientLight;
 uniform float uAmbientIntensity;
 uniform int uFlipWinding;   // 1 when the GRAPH render flips Y (inverts winding)
+uniform float uOpacity;     // entity opacity 0..1 (1 = opaque); < 1 -> transparent pass
+uniform vec3  uEntityColor; // per-entity RGB tint (1,1,1 = none), multiplies albedo
 
 // Directional Light
 uniform vec3 uLightDirection;
@@ -696,6 +698,8 @@ void main() {
         albedo = col;
     }
 
+    albedo *= uEntityColor;   // per-entity RGB tint (BennuGD-style colour)
+
     vec3 normal = normalize(fs_in.normal);
     vec3 viewDir = normalize(uCameraPosition - fs_in.position);
     // Two-sided shading: flip the normal on genuine BACK faces, decided by the
@@ -796,7 +800,7 @@ void main() {
     float fogFactor = calculateFog();
     result = mix(uFogColor, result, fogFactor);
 
-    FragColor = vec4(result, 1.0);
+    FragColor = vec4(result, uOpacity);
 }
 )glsl";
 
@@ -865,6 +869,8 @@ uniform vec3 uCameraPosition;
 uniform vec3 uAmbientLight;
 uniform float uAmbientIntensity;
 uniform int uFlipWinding;   // 1 when the GRAPH render flips Y (inverts winding)
+uniform float uOpacity;     // entity opacity 0..1 (1 = opaque); < 1 -> transparent pass
+uniform vec3  uEntityColor; // per-entity RGB tint (1,1,1 = none), multiplies albedo
 
 uniform vec3 uLightDirection;
 uniform vec3 uLightColor;
@@ -882,7 +888,7 @@ void main() {
 
     vec3 result = albedo * (ambient + diffuse);
 
-    gl_FragColor = vec4(result, 1.0);
+    gl_FragColor = vec4(result, uOpacity);
 }
 )glsl";
 

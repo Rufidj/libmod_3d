@@ -70,6 +70,10 @@ int64_t g3d_entity_set_scale_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_get_position_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_parent_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_material_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_entity_set_alpha_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_entity_set_color_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_entity_set_blend_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_entity_use_locals_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_set_active_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_set_position_bgd(INSTANCE *my, int64_t *params);
@@ -576,6 +580,10 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_PRIMITIVE_MOUNTAIN", "IFFFIF", TYPE_INT, g3d_primitive_mountain_bgd),
     FUNC("G3D_ENTITY_SET_MESH", "II", TYPE_INT, g3d_entity_set_mesh_bgd),
     FUNC("G3D_ENTITY_SET_MATERIAL", "II", TYPE_INT, g3d_entity_set_material_bgd),
+    FUNC("G3D_ENTITY_SET_ALPHA", "II", TYPE_INT, g3d_entity_set_alpha_bgd),
+    FUNC("G3D_ENTITY_SET_COLOR", "IIII", TYPE_INT, g3d_entity_set_color_bgd),
+    FUNC("G3D_ENTITY_SET_BLEND", "II", TYPE_INT, g3d_entity_set_blend_bgd),
+    FUNC("G3D_ENTITY_USE_LOCALS", "I", TYPE_INT, g3d_entity_use_locals_bgd),
     FUNC("G3D_MATERIAL_SET_TEXTURE", "III", TYPE_INT, g3d_material_set_texture_bgd),
     FUNC("G3D_MATERIAL_SET_MAP", "III", TYPE_INT, g3d_material_set_map_bgd),
     FUNC("G3D_MODEL_SUBMESH_MAP", "III", TYPE_INT, g3d_model_submesh_map_bgd),
