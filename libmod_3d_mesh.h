@@ -90,6 +90,7 @@ typedef struct {
     float *bind_nrm;            /* vertex_count*3 — raw bind normals */
     uint16_t *vjoints;          /* vertex_count*4 — joint indices (skin-relative) */
     float *vweights;            /* vertex_count*4 — joint weights */
+    void *lod;                  /* auto-generated low-poly copy (lazy); for entity LOD */
 } G3DMesh;
 
 typedef struct {
@@ -109,8 +110,9 @@ typedef struct {
     void **mesh_metallic;
     void **mesh_roughness;
 
-    /* ---- Skeletal animation (glTF), CPU skinning ---- */
+    /* ---- Skeletal animation (glTF) ---- */
     int skinned;                /* 1 if the model has a skin + skinned meshes */
+    int gpu_skin;               /* 1 = skip CPU skinning; skin on the GPU (bone matrices only) */
     float skin_offset[3];       /* center/ground offset applied after skinning */
 
     /* Node hierarchy (all glTF nodes) */
@@ -157,6 +159,14 @@ int g3d_mesh_upload_gpu(G3DMesh *mesh);
 /* Re-upload vertex data to an already-uploaded mesh (after CPU edits) */
 void g3d_mesh_update_gpu(G3DMesh *mesh);
 void g3d_mesh_update_indices_gpu(G3DMesh *mesh);   /* re-upload the EBO (for terrain holes) */
+
+/* Build a lower-poly copy of a mesh (vertex clustering). grid = cells along the
+   longest axis; smaller = more aggressive. GPU-uploaded. For distance LOD. */
+G3DMesh *g3d_mesh_simplify(const G3DMesh *src, int grid);
+
+/* Return the mesh's cached low-poly LOD, generating it on first use (or the mesh
+   itself if it's too small to simplify). For automatic distance LOD of entities. */
+G3DMesh *g3d_mesh_lod(G3DMesh *mesh);
 
 /* Free mesh (GPU and CPU memory) */
 void g3d_mesh_free(G3DMesh *mesh);

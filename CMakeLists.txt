@@ -61,7 +61,6 @@ else()
         ../../core/bgdrtm
         ../../modules/libbggfx
         ../../modules/libsdlhandler
-        ../../modules/libmod_ray
         ../../vendor/sdl-gpu/include
         ${INCLUDE_DIRECTORIES}
     )
@@ -100,6 +99,7 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_physics.c
     libmod_3d_mirror.c
     libmod_3d_instance.c
+    libmod_3d_stream.c
     libmod_3d_prefab.c
     libmod_3d_scenefile.c
     libmod_3d_pick.c
@@ -118,7 +118,34 @@ else()
     # TODO: libmod_3d_renderer_gpu.c
 endif()
 
+# ============================================================================
+# Optional Jolt Physics backend for rigid bodies (-DUSE_JOLT=ON).
+# When OFF (default) the custom rigid body implementation in
+# libmod_3d_physics.c is used instead -> trivial to switch back.
+# ============================================================================
+option(USE_JOLT "Use Jolt Physics for rigid bodies" OFF)
+if(USE_JOLT AND NOT IS_VITA)
+    list(APPEND SOURCES_LIBMOD_3D libmod_3d_jolt.cpp)
+endif()
+
 add_library(mod_3d ${LIBRARY_BUILD_TYPE} ${SOURCES_LIBMOD_3D})
+
+if(USE_JOLT AND NOT IS_VITA)
+    set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
+    set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
+    set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
+    set(TARGET_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(TARGET_VIEWER OFF CACHE BOOL "" FORCE)
+    set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+    # Jolt is a static lib linked into our .so -> must be position-independent.
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+    add_subdirectory(../../vendor/JoltPhysics/Build ${CMAKE_BINARY_DIR}/jolt EXCLUDE_FROM_ALL)
+    set_target_properties(Jolt PROPERTIES POSITION_INDEPENDENT_CODE ON INTERPROCEDURAL_OPTIMIZATION OFF)
+    target_compile_definitions(mod_3d PRIVATE USE_JOLT)
+    target_link_libraries(mod_3d Jolt)
+    set_target_properties(mod_3d PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED ON)
+endif()
 
 # ============================================================================
 # Linking

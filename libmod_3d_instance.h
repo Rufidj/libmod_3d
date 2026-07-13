@@ -25,7 +25,23 @@ int g3d_instances_create(void *mesh, void *texture);
 int g3d_instances_add(int group, float x, float y, float z,
                       float yaw_deg, float scale);
 
+/* Update instance `index` in place (own a stable slot per process). */
+void g3d_instances_set(int group, int index, float x, float y, float z,
+                       float yaw_deg, float scale);
+
+/* Like g3d_instances_create but GPU-skinned: `mesh` is a skinned submesh (with
+   bind pose + joints/weights) and `model` supplies the bone matrices. Call
+   g3d_model_set_gpu_skin(model, 1) so animate only computes bones. */
+int g3d_instances_create_skinned(void *mesh, void *texture, void *model);
+
 void g3d_instances_set_wind(int group, float strength);
+/* 1 = alpha-test discard (foliage/leaves); 0 = solid (creatures). Default 1. */
+void g3d_instances_set_alpha_cut(int group, int enabled);
+/* Global automatic LOD: beyond `d` world units every instanced object is drawn
+   with an auto-generated low-poly (un-skinned) mesh. 0 = off. Fully automatic;
+   no per-object code. */
+void g3d_instances_set_lod_distance(float d);
+float g3d_instances_get_lod_distance(void);   /* 0 = off */
 void g3d_instances_set_distance(int group, float dist);
 void g3d_instances_clear(int group);
 int g3d_instances_count(int group);

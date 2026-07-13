@@ -644,6 +644,10 @@ void g3d_renderer_underwater_pass(void) {
         g_renderer.post_shader = g3d_shader_create(post_vert, post_frag_underwater);
     ensure_fs_quad();
     if (!g_renderer.post_shader) return;
+    /* Draw into the scene framebuffer (HDR fbo when HDR is on); a prior pass may
+       have left another FBO bound, which would send the tint nowhere visible. */
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.framebuffer);
+    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
     g3d_renderer_capture_scene();   /* grab the current frame */
     G3DShaderProgram *sh = (G3DShaderProgram *)g_renderer.post_shader;
     g3d_shader_use(sh);
@@ -982,14 +986,40 @@ static const char *cloud_frag =
     "  F = vec4(scat, T);\n"                 /* blend GL_ONE, GL_SRC_ALPHA -> dst*T + scat */
     "}\n";
 
+/* Upscale composite: samples the half-res (scat,T) target; the GL_ONE,GL_SRC_ALPHA
+   blend then does dst*T + scat, identical to the full-res path. */
+static const char *cloud_composite_frag =
+    "#version 330 core\n"
+    "in vec2 vUV; out vec4 F;\n"
+    "uniform sampler2D uClouds;\n"
+    "void main(){ F = texture(uClouds, vUV); }\n";
+
 void g3d_renderer_cloud_pass(void) {
     if (!g_renderer.hdr_active || !g_renderer.hdr_ready || !g_renderer.active_camera) return;
     float cover, base, thick, speed;
     if (!g3d_sky_low_clouds(&cover, &base, &thick, &speed)) return;   /* off -> skip */
 
-    static G3DShaderProgram *sh = NULL;
-    if (!sh) { sh = g3d_shader_create(post_vert, cloud_frag); ensure_fs_quad(); }
-    if (!sh) return;
+    static G3DShaderProgram *sh = NULL, *csh = NULL;
+    if (!sh)  { sh = g3d_shader_create(post_vert, cloud_frag); ensure_fs_quad(); }
+    if (!csh) { csh = g3d_shader_create(post_vert, cloud_composite_frag); }
+    if (!sh || !csh) return;
+
+    /* Half-res target (1/4 the pixels for the expensive raymarch). */
+    uint32_t hw = g_renderer.display_width / 2, hh = g_renderer.display_height / 2;
+    if (hw < 1) hw = 1; if (hh < 1) hh = 1;
+    if (!g_renderer.cloud_fbo || g_renderer.cloud_w != hw || g_renderer.cloud_h != hh) {
+        if (!g_renderer.cloud_fbo) glGenFramebuffers(1, &g_renderer.cloud_fbo);
+        if (!g_renderer.cloud_tex) glGenTextures(1, &g_renderer.cloud_tex);
+        glBindTexture(GL_TEXTURE_2D, g_renderer.cloud_tex);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, hw, hh, 0, GL_RGBA, GL_FLOAT, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.cloud_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, g_renderer.cloud_tex, 0);
+        g_renderer.cloud_w = hw; g_renderer.cloud_h = hh;
+    }
 
     Mat4 proj = g3d_camera_get_projection(g_renderer.active_camera);
     if (g_renderer.flip_y) { proj.m[1]=-proj.m[1]; proj.m[5]=-proj.m[5]; proj.m[9]=-proj.m[9]; proj.m[13]=-proj.m[13]; }
@@ -1000,10 +1030,11 @@ void g3d_renderer_cloud_pass(void) {
     float sdir[3], scol[3], amb[3];
     g3d_sky_get_sun(sdir, scol); g3d_sky_get_ambient(amb);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.hdr_fbo);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
-    glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
-    glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_SRC_ALPHA);   /* dst*T + scat */
+    /* Pass 1: raymarch into the half-res target (overwrite, no blend). */
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.cloud_fbo);
+    glViewport(0, 0, hw, hh);
+    glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE); glDisable(GL_BLEND);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f); glClear(GL_COLOR_BUFFER_BIT);   /* scat=0, T=1 */
     glBindVertexArray(g_renderer.post_vao);
     g3d_shader_use(sh);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, g_renderer.hdr_depth); g3d_shader_set_int(sh, "uDepth", 0);
@@ -1017,6 +1048,14 @@ void g3d_renderer_cloud_pass(void) {
     g3d_shader_set_float(sh, "uCloudSpeed", speed);
     g3d_shader_set_float(sh, "uCloudBase", base);
     g3d_shader_set_float(sh, "uCloudThick", thick);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    /* Pass 2: composite (bilinear upscale) into HDR with the cloud blend. */
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.hdr_fbo);
+    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_SRC_ALPHA);   /* dst*T + scat */
+    g3d_shader_use(csh);
+    glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, g_renderer.cloud_tex); g3d_shader_set_int(csh, "uClouds", 0);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); glDisable(GL_BLEND);
@@ -1150,12 +1189,34 @@ void g3d_renderer_forward_pass(void) {
         if (!entity || !entity->active)
             continue;
 
-        /* Skip entities without a mesh assigned */
+        /* Get entity's world matrix */
+        Mat4 world_matrix = g3d_entity_impl_get_world_matrix(entity_id);
+        float lodd = g3d_instances_get_lod_distance();
+
+        /* Model far-LOD root: when the whole model is far, draw ONE merged +
+           decimated mesh instead of all its submesh children. */
+        if (entity->lod_mesh && lodd > 0.0f) {
+            float ex = world_matrix.m[12] - camera->position.x;
+            float ey = world_matrix.m[13] - camera->position.y;
+            float ez = world_matrix.m[14] - camera->position.z;
+            entity->lod_far = (ex*ex + ey*ey + ez*ez > lodd * lodd) ? 1 : 0;
+            if (entity->lod_far) {
+                G3DMaterial *lmat = (entity->lod_material >= 0) ? g3d_material_impl_get(entity->lod_material) : NULL;
+                g3d_renderer_render_mesh(entity->lod_mesh, lmat, world_matrix, mat4_identity());
+                continue;
+            }
+        }
+
+        /* Skip entities without a mesh assigned (e.g. a near model root) */
         if (!entity->mesh)
             continue;
 
-        /* Get entity's world matrix */
-        Mat4 world_matrix = g3d_entity_impl_get_world_matrix(entity_id);
+        /* Child of a model root that is drawing its merged far-LOD -> skip. */
+        if (entity->parent_id >= 0) {
+            G3DEntity *par = g3d_entity_impl_get(entity->parent_id);
+            if (par && par->lod_far)
+                continue;
+        }
 
         /* Frustum culling: transform the mesh AABB's 8 corners to world space,
            build a world AABB and test it against the camera frustum. */
@@ -1188,9 +1249,20 @@ void g3d_renderer_forward_pass(void) {
             material = g3d_material_impl_get(entity->material_id);
         }
 
+        /* Automatic LOD: far entities render their auto-generated low-poly mesh.
+           Same global g3d_set_lod distance as instanced objects; no game code. */
+        void *drawmesh = entity->mesh;
+        if (lodd > 0.0f) {
+            float ex = world_matrix.m[12] - camera->position.x;
+            float ey = world_matrix.m[13] - camera->position.y;
+            float ez = world_matrix.m[14] - camera->position.z;
+            if (ex*ex + ey*ey + ez*ez > lodd * lodd)
+                drawmesh = g3d_mesh_lod((G3DMesh *)entity->mesh);
+        }
+
         /* Render the entity's mesh (render_mesh recomputes the normal matrix
            from the model matrix internally) */
-        g3d_renderer_render_mesh(entity->mesh, material, world_matrix,
+        g3d_renderer_render_mesh(drawmesh, material, world_matrix,
                                  mat4_identity());
     }
 }

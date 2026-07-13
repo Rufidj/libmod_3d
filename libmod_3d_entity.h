@@ -38,11 +38,21 @@ typedef struct {
 
     /* Collision: 1 = solid box collider (uses the mesh world AABB) */
     int collider;
+
+    /* Model far-LOD: on a g3d_model_spawn root, a single merged+decimated mesh
+       drawn (with lod_material) when the model is beyond g3d_set_lod distance,
+       replacing all its submesh children (61 draws -> 1). lod_far = this frame's
+       state, read by the children to skip themselves. */
+    void *lod_mesh;
+    int lod_material;
+    int lod_far;
 } G3DEntity;
 
 /* Entity lifecycle */
 int g3d_entity_impl_spawn(int scene_id, int model_id, float x, float y, float z);
 int g3d_entity_impl_destroy(int entity_id);
+int g3d_entity_impl_destroy_tree(int root_id, int free_materials);
+void g3d_entity_impl_rebase(float dx, float dy, float dz);   /* floating origin */
 G3DEntity *g3d_entity_impl_get(int entity_id);
 
 /* Transform */

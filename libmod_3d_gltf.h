@@ -43,6 +43,12 @@ extern "C" {
  */
 G3DModel *g3d_gltf_load(const char *filepath);
 
+/* Fracture loader: one submesh per NODE (not per material). A pre-fractured
+   model whose chunks share one material comes in as N separate submeshes, each
+   keeping its chunk's world position (submesh AABB centre = chunk centroid).
+   Static geometry only. */
+G3DModel *g3d_gltf_load_fractured(const char *filepath);
+
 /* Bake an orientation correction (Euler radians) into a model and re-ground it.
    For models whose authored bind pose comes tilted. */
 void g3d_model_orient(G3DModel *model, float rx, float ry, float rz);

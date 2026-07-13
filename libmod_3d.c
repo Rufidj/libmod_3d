@@ -24,6 +24,7 @@
 #include "libmod_3d_collide.h"
 #include "libmod_3d_mirror.h"
 #include "libmod_3d_instance.h"
+#include "libmod_3d_stream.h"
 #include "libmod_3d_prefab.h"
 #include "libmod_3d_scenefile.h"
 #include "libmod_3d_voxterrain.h"
@@ -205,6 +206,15 @@ int64_t g3d_entity_spawn_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_entity_destroy_bgd(INSTANCE *my, int64_t *params) {
     int entity_id = (int)params[0];
     return g3d_entity_impl_destroy(entity_id);
+}
+
+/* Despawn a model spawned with g3d_model_spawn: destroys the root, all its
+   submesh children and releases their private materials. Also works on a
+   single entity+material (e.g. a fracture chunk). Use this to avoid leaking
+   entity/material pool slots when spawning/despawning constantly. */
+int64_t g3d_model_despawn_bgd(INSTANCE *my, int64_t *params) {
+    int root_id = (int)params[0];
+    return g3d_entity_impl_destroy_tree(root_id, 1);
 }
 
 int64_t g3d_entity_set_position_bgd(INSTANCE *my, int64_t *params) {
@@ -530,6 +540,16 @@ int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params) {
     return (int64_t)(intptr_t)model;
 }
 
+int64_t g3d_model_load_gltf_fractured_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
+    const char *filename = (const char *)string_get(params[0]);
+    G3DModel *model = g3d_gltf_load_fractured(filename);
+    string_discard(params[0]);
+    if (!model)
+        return -1;
+    return (int64_t)(intptr_t)model;
+}
+
 int64_t g3d_model_load_obj_bgd(INSTANCE *my, int64_t *params) {
     g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
@@ -571,6 +591,18 @@ int64_t g3d_model_orient_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_model_submesh_count_bgd(INSTANCE *my, int64_t *params) {
     G3DModel *model = (G3DModel *)(intptr_t)params[0];
     return model ? (int64_t)model->mesh_count : 0;
+}
+
+/* Build a simplified LOD copy of a submesh; returns a mesh handle usable in
+   g3d_instances_create (for a distance LOD level). grid: cells along the longest
+   axis (e.g. 10 aggressive .. 24 mild). */
+int64_t g3d_model_submesh_lod_bgd(INSTANCE *my, int64_t *params) {
+    G3DModel *model = (G3DModel *)(intptr_t)params[0];
+    int i = (int)params[1];
+    int grid = (int)params[2];
+    if (!model || i < 0 || i >= (int)model->mesh_count) return -1;
+    G3DMesh *lod = g3d_mesh_simplify(&model->meshes[i], grid);
+    return lod ? (int64_t)(intptr_t)lod : -1;
 }
 
 /* ---- Skeletal animation ---- */
@@ -724,6 +756,74 @@ int64_t g3d_model_submesh_texture_bgd(INSTANCE *my, int64_t *params) {
     return (int64_t)(intptr_t)model->mesh_textures[i];
 }
 
+/* Per-submesh AABB in model space (centre + half-extents), for fracture chunks:
+   each chunk = one submesh -> its own rigid body sized/placed from these. */
+static float g3d_submesh_aabb(void *mp, int i, int comp, int half) {
+    G3DModel *m = (G3DModel *)mp;
+    if (!m || i < 0 || i >= (int)m->mesh_count) return 0.0f;
+    float lo = m->meshes[i].aabb_min[comp], hi = m->meshes[i].aabb_max[comp];
+    return half ? (hi - lo) * 0.5f : (hi + lo) * 0.5f;
+}
+/* Expose a submesh's CPU vertex positions (+ triangle indices) so the physics
+   backend can build convex hulls and static mesh colliders. Returns the vertex
+   count (0 on failure); *pos -> first position, *stride_floats = floats between
+   consecutive vertices. Declared in libmod_3d_physics.h and used by the Jolt
+   backend. */
+int g3d_physics_submesh_geom(void *mp, int i, const float **pos, int *stride_floats,
+                             const unsigned int **indices, int *icount) {
+    G3DModel *m = (G3DModel *)mp;
+    if (!m || i < 0 || i >= (int)m->mesh_count) return 0;
+    G3DMesh *mesh = &m->meshes[i];
+    if (!mesh->vertices || mesh->vertex_count == 0) return 0;
+    if (pos)           *pos = mesh->vertices[0].position;
+    if (stride_floats) *stride_floats = (int)(sizeof(G3DVertex) / sizeof(float));
+    if (indices)       *indices = mesh->indices;
+    if (icount)        *icount = (int)mesh->index_count;
+    return (int)mesh->vertex_count;
+}
+
+int64_t g3d_model_submesh_cx_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 0, 0); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_cy_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 1, 0); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_cz_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 2, 0); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_hx_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 0, 1); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_hy_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 1, 1); return (int64_t)*(int32_t*)&v; }
+int64_t g3d_model_submesh_hz_bgd(INSTANCE *my, int64_t *params) { float v = g3d_submesh_aabb((void*)(intptr_t)params[0], (int)params[1], 2, 1); return (int64_t)*(int32_t*)&v; }
+
+int64_t g3d_rigidbody_set_model_offset_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_model_offset((int)params[0], *(float*)&params[1], *(float*)&params[2], *(float*)&params[3]);
+    return 1;
+}
+
+/* Merge ALL of a model's submeshes into one mesh (positions scaled by s), then
+   decimate it -> a single low-poly mesh for the far-LOD of detailed multi-part
+   models (e.g. a 61-submesh ship: 61 draws -> 1 far away). One texture only
+   (the model albedo); fine at distance. Returns NULL if not worth it. */
+static G3DMesh *build_model_merged_lod(G3DModel *model, float s) {
+    if (!model || model->mesh_count < 4) return NULL;
+    uint32_t tv = 0, ti = 0;
+    for (uint32_t i = 0; i < model->mesh_count; i++) { tv += model->meshes[i].vertex_count; ti += model->meshes[i].index_count; }
+    if (tv < 48 || ti < 3) return NULL;
+    G3DVertex *verts = (G3DVertex *)malloc((size_t)tv * sizeof(G3DVertex));
+    uint32_t *idx = (uint32_t *)malloc((size_t)ti * sizeof(uint32_t));
+    if (!verts || !idx) { free(verts); free(idx); return NULL; }
+    uint32_t vo = 0, io = 0;
+    for (uint32_t i = 0; i < model->mesh_count; i++) {
+        G3DMesh *sm = &model->meshes[i];
+        for (uint32_t v = 0; v < sm->vertex_count; v++) {
+            verts[vo + v] = sm->vertices[v];
+            verts[vo + v].position[0] *= s; verts[vo + v].position[1] *= s; verts[vo + v].position[2] *= s;
+        }
+        for (uint32_t k = 0; k < sm->index_count; k++) idx[io + k] = sm->indices[k] + vo;
+        vo += sm->vertex_count; io += sm->index_count;
+    }
+    G3DMesh *merged = g3d_mesh_create("merged", verts, tv, idx, ti);
+    free(verts); free(idx);
+    if (!merged) return NULL;
+    G3DMesh *lod = g3d_mesh_simplify(merged, 16);   /* decimate the whole thing */
+    g3d_mesh_free(merged);
+    return lod;
+}
+
 /* Spawn a whole model (all submeshes) under one empty root entity; returns the
    root id. Move/rotate/scale the root to move the entire model. */
 int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
@@ -765,6 +865,37 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
         g3d_entity_impl_set_material(ent, mat);
         g3d_entity_impl_set_scale(ent, s, s, s);
         g3d_entity_impl_set_parent(ent, root);               /* child of the root -> moves with it */
+    }
+
+    /* Far-LOD: one merged, decimated mesh drawn (with the model albedo) instead
+       of all the submesh children when the model is beyond g3d_set_lod distance. */
+    G3DMesh *mlod = build_model_merged_lod(model, s);
+    if (mlod) {
+        G3DEntity *re = g3d_entity_impl_get(root);
+        if (re) {
+            re->lod_mesh = mlod;
+            int lmat = g3d_material_impl_create();
+            G3DMaterial *lm = g3d_material_impl_get(lmat);
+            if (lm) {
+                /* The merged mesh mixes many UV spaces, so a single texture can't
+                   map right -> flat-shade it with the AVERAGE colour of the model's
+                   main texture (clean coloured low-poly instead of white). */
+                lm->albedo_texture = NULL;
+                lm->albedo_texture_id = -1;
+                unsigned long long r = 0, g = 0, b = 0, n = 0;
+                if (model->mesh_textures) {
+                    for (uint32_t i = 0; i < model->mesh_count; i++) {
+                        G3DTexture *t = (G3DTexture *)model->mesh_textures[i];
+                        if (!t || !t->data || t->data_size < 4) continue;
+                        int ch = (t->channels >= 3) ? (int)t->channels : 4;
+                        size_t step = (size_t)ch * 16;   /* sparse sample: fast + representative */
+                        for (size_t p = 0; p + 2 < t->data_size; p += step) { r += t->data[p]; g += t->data[p+1]; b += t->data[p+2]; n++; }
+                    }
+                }
+                if (n) { lm->color[0] = (float)r/n/255.0f; lm->color[1] = (float)g/n/255.0f; lm->color[2] = (float)b/n/255.0f; lm->color[3] = 1.0f; }
+            }
+            re->lod_material = lmat;
+        }
     }
     return root;
 }
@@ -947,6 +1078,11 @@ int64_t g3d_water_set_ssr_bgd(INSTANCE *my, int64_t *params) {
     g3d_water_set_ssr((int)params[0], *(float *)&params[1]);
     return 1;
 }
+int64_t g3d_set_underwater_bgd(INSTANCE *my, int64_t *params) {
+    g3d_renderer_set_underwater((int)params[0], *(float *)&params[1], *(float *)&params[2],
+                                *(float *)&params[3], *(float *)&params[4]);
+    return 1;
+}
 int64_t g3d_water_set_ocean_bgd(INSTANCE *my, int64_t *params) {
     g3d_water_set_ocean(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2]);
     return 1;
@@ -1078,11 +1214,56 @@ int64_t g3d_instances_add_bgd(INSTANCE *my, int64_t *params) {
     float scale = *(float *)&params[5];
     return (int64_t)g3d_instances_add(group, x, y, z, yaw, scale);
 }
+int64_t g3d_instances_set_bgd(INSTANCE *my, int64_t *params) {
+    g3d_instances_set((int)params[0], (int)params[1], *(float *)&params[2],
+                      *(float *)&params[3], *(float *)&params[4],
+                      *(float *)&params[5], *(float *)&params[6]);
+    return 1;
+}
+int64_t g3d_instances_create_skinned_bgd(INSTANCE *my, int64_t *params) {
+    return (int64_t)g3d_instances_create_skinned((void *)(intptr_t)params[0],
+                                                 (void *)(intptr_t)params[1],
+                                                 (void *)(intptr_t)params[2]);
+}
+int64_t g3d_model_set_gpu_skin_bgd(INSTANCE *my, int64_t *params) {
+    g3d_model_set_gpu_skin((G3DModel *)(intptr_t)params[0], (int)params[1]);
+    return 1;
+}
 
 int64_t g3d_instances_set_wind_bgd(INSTANCE *my, int64_t *params) {
     g3d_instances_set_wind((int)params[0], *(float *)&params[1]);
     return 1;
 }
+int64_t g3d_instances_set_alpha_cut_bgd(INSTANCE *my, int64_t *params) {
+    g3d_instances_set_alpha_cut((int)params[0], (int)params[1]);
+    return 1;
+}
+int64_t g3d_set_lod_bgd(INSTANCE *my, int64_t *params) {
+    g3d_instances_set_lod_distance(*(float *)&params[0]);
+    return 1;
+}
+/* Floating origin: shift the whole world by (-dx,-dy,-dz) so coordinates stay
+   small far from the origin (float precision). The game calls this when the
+   camera drifts past a threshold, then offsets its own camera + bookkeeping. */
+int64_t g3d_world_rebase_bgd(INSTANCE *my, int64_t *params) {
+    g3d_entity_impl_rebase(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+
+/* ---- world streaming (tile ring manager) ---- */
+int64_t g3d_stream_init_bgd(INSTANCE *my, int64_t *params) {
+    g3d_stream_init(*(float *)&params[0], (int)params[1]); return 1;
+}
+int64_t g3d_stream_update_bgd(INSTANCE *my, int64_t *params) {
+    g3d_stream_update(*(float *)&params[0], *(float *)&params[1]); return 1;
+}
+int64_t g3d_stream_load_count_bgd(INSTANCE *my, int64_t *params)   { return (int64_t)g3d_stream_load_count(); }
+int64_t g3d_stream_load_x_bgd(INSTANCE *my, int64_t *params)       { return (int64_t)g3d_stream_load_x((int)params[0]); }
+int64_t g3d_stream_load_z_bgd(INSTANCE *my, int64_t *params)       { return (int64_t)g3d_stream_load_z((int)params[0]); }
+int64_t g3d_stream_unload_count_bgd(INSTANCE *my, int64_t *params) { return (int64_t)g3d_stream_unload_count(); }
+int64_t g3d_stream_unload_x_bgd(INSTANCE *my, int64_t *params)     { return (int64_t)g3d_stream_unload_x((int)params[0]); }
+int64_t g3d_stream_unload_z_bgd(INSTANCE *my, int64_t *params)     { return (int64_t)g3d_stream_unload_z((int)params[0]); }
+int64_t g3d_stream_loaded_count_bgd(INSTANCE *my, int64_t *params) { return (int64_t)g3d_stream_loaded_count(); }
 
 int64_t g3d_instances_set_distance_bgd(INSTANCE *my, int64_t *params) {
     g3d_instances_set_distance((int)params[0], *(float *)&params[1]);
@@ -1613,6 +1794,67 @@ int64_t g3d_vehicle_yaw_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2M
 int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_pitch((int)params[0])); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_vehicle_roll((int)params[0])); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_vehicle_speed_bgd(INSTANCE *my, int64_t *params) { float v = g3d_vehicle_speed((int)params[0]); return (int64_t) * (int32_t *)&v; }
+/* ---- rigid bodies ---- */
+int64_t g3d_rigidbody_create_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
+                                *(float *)&params[6]);
+}
+int64_t g3d_rigidbody_create_sphere_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_sphere(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                       *(float *)&params[3], *(float *)&params[4]);
+}
+int64_t g3d_rigidbody_create_capsule_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_capsule(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                        *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+}
+int64_t g3d_rigidbody_create_cylinder_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_cylinder(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                         *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+}
+int64_t g3d_rigidbody_create_convex_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_convex(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                       (void *)(intptr_t)params[3], (int)params[4],
+                                       *(float *)&params[5], *(float *)&params[6]);
+}
+int64_t g3d_rigidbody_set_ccd_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_ccd((int)params[0], (int)params[1]); return 1;
+}
+int64_t g3d_collider_add_mesh_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_collider_add_mesh((void *)(intptr_t)params[0], (int)params[1],
+                                 *(float *)&params[2], *(float *)&params[3],
+                                 *(float *)&params[4], *(float *)&params[5]);
+}
+int64_t g3d_rigidbody_destroy_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_destroy((int)params[0]); return 1; }
+int64_t g3d_rigidbody_clear_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_clear(); return 1; }
+int64_t g3d_rigidbody_step_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_step(*(float *)&params[0]); return 1; }
+int64_t g3d_rigidbody_apply_impulse_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_apply_impulse((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_velocity_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_velocity((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_bounce_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_bounce((int)params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+int64_t g3d_rigidbody_x_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_x((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_y_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_y((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_z_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_z((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_grounded_bgd(INSTANCE *my, int64_t *params) { return g3d_rigidbody_grounded((int)params[0]); }
+int64_t g3d_rigidbody_set_angular_velocity_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_angular_velocity((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_angle_x_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_rigidbody_angle_x((int)params[0])); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_angle_y_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_rigidbody_angle_y((int)params[0])); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_angle_z_bgd(INSTANCE *my, int64_t *params) { float v = G3D_RAD2MD(g3d_rigidbody_angle_z((int)params[0])); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_render_x_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_render_x((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_render_y_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_render_y((int)params[0]); return (int64_t) * (int32_t *)&v; }
+int64_t g3d_rigidbody_render_z_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_render_z((int)params[0]); return (int64_t) * (int32_t *)&v; }
+
 
 static int g3d_object_info(void *what, REGION *clip, int64_t *key, int64_t *ready) {
     *key = INT64_MAX; /* Highest Z -> draws first / at the bottom */

@@ -63,6 +63,7 @@ int64_t g3d_scene_destroy_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_scene_set_active_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_spawn_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_destroy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_despawn_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_position_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_rotation_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_scale_bgd(INSTANCE *my, int64_t *params);
@@ -76,6 +77,7 @@ int64_t g3d_camera_look_at_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_set_projection_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_set_fov_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_load_gltf_fractured_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_obj_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_fbx_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_mesh_bgd(INSTANCE *my, int64_t *params);
@@ -101,6 +103,13 @@ int64_t g3d_ray_hit_z_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_ray_entity_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_submesh_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_submesh_texture_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_cx_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_cy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_cz_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_hx_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_hy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_hz_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_model_offset_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_spawn_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_md3_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_texture_load_bgd(INSTANCE *my, int64_t *params);
@@ -141,6 +150,7 @@ int64_t g3d_set_bloom_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_tonemap_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_ssao_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_ssr_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_underwater_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_ocean_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_tessellation_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fire_add_bgd(INSTANCE *my, int64_t *params);
@@ -161,7 +171,23 @@ int64_t g3d_mirror_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_mirror_set_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_add_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_instances_set_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_instances_create_skinned_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_set_gpu_skin_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_submesh_lod_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_set_wind_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_instances_set_alpha_cut_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_lod_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_world_rebase_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_init_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_update_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_load_count_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_load_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_load_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_unload_count_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_unload_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_unload_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_stream_loaded_count_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_set_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_instances_count_bgd(INSTANCE *my, int64_t *params);
@@ -255,6 +281,30 @@ int64_t g3d_vehicle_yaw_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_pitch_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_roll_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_speed_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_sphere_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_capsule_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_cylinder_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_convex_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_ccd_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_collider_add_mesh_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_destroy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_step_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_apply_impulse_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_velocity_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_bounce_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_grounded_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_set_angular_velocity_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_angle_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_angle_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_angle_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_render_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_render_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_render_z_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_mesh_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params);
@@ -269,6 +319,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_SCENE_SET_ACTIVE", "I", TYPE_INT, g3d_scene_set_active_bgd),
     FUNC("G3D_ENTITY_SPAWN", "IIFFF", TYPE_INT, g3d_entity_spawn_bgd),
     FUNC("G3D_ENTITY_DESTROY", "I", TYPE_INT, g3d_entity_destroy_bgd),
+    FUNC("G3D_MODEL_DESPAWN", "I", TYPE_INT, g3d_model_despawn_bgd),
     FUNC("G3D_ENTITY_SET_POSITION", "IFFF", TYPE_INT, g3d_entity_set_position_bgd),
     FUNC("G3D_ENTITY_SET_ROTATION", "IFFF", TYPE_INT, g3d_entity_set_rotation_bgd),
     FUNC("G3D_ENTITY_SET_SCALE", "IFFF", TYPE_INT, g3d_entity_set_scale_bgd),
@@ -281,6 +332,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CAMERA_SET_PROJECTION", "II", TYPE_INT, g3d_camera_set_projection_bgd),
     FUNC("G3D_CAMERA_SET_FOV", "IF", TYPE_INT, g3d_camera_set_fov_bgd),
     FUNC("G3D_LOAD_GLTF", "S", TYPE_INT, g3d_model_load_gltf_bgd),
+    FUNC("G3D_LOAD_GLTF_FRACTURED", "S", TYPE_INT, g3d_model_load_gltf_fractured_bgd),
     FUNC("G3D_LOAD_OBJ", "S", TYPE_INT, g3d_model_load_obj_bgd),
     FUNC("G3D_LOAD_FBX", "S", TYPE_INT, g3d_model_load_fbx_bgd),
     FUNC("G3D_MODEL_MESH", "I", TYPE_INT, g3d_model_mesh_bgd),
@@ -306,6 +358,12 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_RAY_ENTITY", "", TYPE_INT, g3d_ray_entity_bgd),
     FUNC("G3D_MODEL_SUBMESH", "II", TYPE_INT, g3d_model_submesh_bgd),
     FUNC("G3D_MODEL_SUBMESH_TEXTURE", "II", TYPE_INT, g3d_model_submesh_texture_bgd),
+    FUNC("G3D_MODEL_SUBMESH_CX", "II", TYPE_FLOAT, g3d_model_submesh_cx_bgd),
+    FUNC("G3D_MODEL_SUBMESH_CY", "II", TYPE_FLOAT, g3d_model_submesh_cy_bgd),
+    FUNC("G3D_MODEL_SUBMESH_CZ", "II", TYPE_FLOAT, g3d_model_submesh_cz_bgd),
+    FUNC("G3D_MODEL_SUBMESH_HX", "II", TYPE_FLOAT, g3d_model_submesh_hx_bgd),
+    FUNC("G3D_MODEL_SUBMESH_HY", "II", TYPE_FLOAT, g3d_model_submesh_hy_bgd),
+    FUNC("G3D_MODEL_SUBMESH_HZ", "II", TYPE_FLOAT, g3d_model_submesh_hz_bgd),
     FUNC("G3D_MODEL_SPAWN", "IIFFFFF", TYPE_INT, g3d_model_spawn_bgd),
     FUNC("G3D_LOAD_MD3", "S", TYPE_INT, g3d_model_load_md3_bgd),
     FUNC("G3D_LOAD_TEXTURE", "S", TYPE_INT, g3d_texture_load_bgd),
@@ -358,6 +416,31 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_VEHICLE_PITCH", "I", TYPE_FLOAT, g3d_vehicle_pitch_bgd),
     FUNC("G3D_VEHICLE_ROLL", "I", TYPE_FLOAT, g3d_vehicle_roll_bgd),
     FUNC("G3D_VEHICLE_SPEED", "I", TYPE_FLOAT, g3d_vehicle_speed_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE", "FFFFFFF", TYPE_INT, g3d_rigidbody_create_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE_SPHERE", "FFFFF", TYPE_INT, g3d_rigidbody_create_sphere_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE_CAPSULE", "FFFFFF", TYPE_INT, g3d_rigidbody_create_capsule_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE_CYLINDER", "FFFFFF", TYPE_INT, g3d_rigidbody_create_cylinder_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE_CONVEX", "FFFIIFF", TYPE_INT, g3d_rigidbody_create_convex_bgd),
+    FUNC("G3D_RIGIDBODY_SET_CCD", "II", TYPE_INT, g3d_rigidbody_set_ccd_bgd),
+    FUNC("G3D_COLLIDER_ADD_MESH", "IIFFFF", TYPE_INT, g3d_collider_add_mesh_bgd),
+    FUNC("G3D_RIGIDBODY_DESTROY", "I", TYPE_INT, g3d_rigidbody_destroy_bgd),
+    FUNC("G3D_RIGIDBODY_CLEAR", "", TYPE_INT, g3d_rigidbody_clear_bgd),
+    FUNC("G3D_RIGIDBODY_STEP", "F", TYPE_INT, g3d_rigidbody_step_bgd),
+    FUNC("G3D_RIGIDBODY_APPLY_IMPULSE", "IFFF", TYPE_INT, g3d_rigidbody_apply_impulse_bgd),
+    FUNC("G3D_RIGIDBODY_SET_VELOCITY", "IFFF", TYPE_INT, g3d_rigidbody_set_velocity_bgd),
+    FUNC("G3D_RIGIDBODY_SET_BOUNCE", "IFF", TYPE_INT, g3d_rigidbody_set_bounce_bgd),
+    FUNC("G3D_RIGIDBODY_X", "I", TYPE_FLOAT, g3d_rigidbody_x_bgd),
+    FUNC("G3D_RIGIDBODY_Y", "I", TYPE_FLOAT, g3d_rigidbody_y_bgd),
+    FUNC("G3D_RIGIDBODY_Z", "I", TYPE_FLOAT, g3d_rigidbody_z_bgd),
+    FUNC("G3D_RIGIDBODY_GROUNDED", "I", TYPE_INT, g3d_rigidbody_grounded_bgd),
+    FUNC("G3D_RIGIDBODY_SET_ANGULAR_VELOCITY", "IFFF", TYPE_INT, g3d_rigidbody_set_angular_velocity_bgd),
+    FUNC("G3D_RIGIDBODY_ANGLE_X", "I", TYPE_FLOAT, g3d_rigidbody_angle_x_bgd),
+    FUNC("G3D_RIGIDBODY_ANGLE_Y", "I", TYPE_FLOAT, g3d_rigidbody_angle_y_bgd),
+    FUNC("G3D_RIGIDBODY_ANGLE_Z", "I", TYPE_FLOAT, g3d_rigidbody_angle_z_bgd),
+    FUNC("G3D_RIGIDBODY_RENDER_X", "I", TYPE_FLOAT, g3d_rigidbody_render_x_bgd),
+    FUNC("G3D_RIGIDBODY_RENDER_Y", "I", TYPE_FLOAT, g3d_rigidbody_render_y_bgd),
+    FUNC("G3D_RIGIDBODY_RENDER_Z", "I", TYPE_FLOAT, g3d_rigidbody_render_z_bgd),
+    FUNC("G3D_RIGIDBODY_SET_MODEL_OFFSET", "IFFF", TYPE_INT, g3d_rigidbody_set_model_offset_bgd),
     FUNC("G3D_SKY_SET_TEXTURE", "I", TYPE_INT, g3d_sky_set_texture_bgd),
     FUNC("G3D_SKY_ENABLE", "I", TYPE_INT, g3d_sky_set_enabled_bgd),
     FUNC("G3D_MOUSE_CAPTURE", "I", TYPE_INT, g3d_mouse_capture_bgd),
@@ -372,6 +455,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_SET_TONEMAP", "I", TYPE_INT, g3d_set_tonemap_bgd),
     FUNC("G3D_SET_SSAO", "IFF", TYPE_INT, g3d_set_ssao_bgd),
     FUNC("G3D_WATER_SET_SSR", "IF", TYPE_INT, g3d_water_set_ssr_bgd),
+    FUNC("G3D_SET_UNDERWATER", "IFFFF", TYPE_INT, g3d_set_underwater_bgd),
     FUNC("G3D_WATER_SET_OCEAN", "FFF", TYPE_INT, g3d_water_set_ocean_bgd),
     FUNC("G3D_WATER_SET_TESSELLATION", "I", TYPE_INT, g3d_water_set_tessellation_bgd),
     FUNC("G3D_FIRE_ADD", "FFFF", TYPE_INT, g3d_fire_add_bgd),
@@ -392,7 +476,23 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_MIRROR_SET_DISTANCE", "F", TYPE_INT, g3d_mirror_set_distance_bgd),
     FUNC("G3D_INSTANCES_CREATE", "II", TYPE_INT, g3d_instances_create_bgd),
     FUNC("G3D_INSTANCES_ADD", "IFFFFF", TYPE_INT, g3d_instances_add_bgd),
+    FUNC("G3D_INSTANCES_SET", "IIFFFFF", TYPE_INT, g3d_instances_set_bgd),
+    FUNC("G3D_INSTANCES_CREATE_SKINNED", "III", TYPE_INT, g3d_instances_create_skinned_bgd),
+    FUNC("G3D_MODEL_SET_GPU_SKIN", "II", TYPE_INT, g3d_model_set_gpu_skin_bgd),
+    FUNC("G3D_MODEL_SUBMESH_LOD", "III", TYPE_INT, g3d_model_submesh_lod_bgd),
     FUNC("G3D_INSTANCES_SET_WIND", "IF", TYPE_INT, g3d_instances_set_wind_bgd),
+    FUNC("G3D_INSTANCES_SET_ALPHA_CUT", "II", TYPE_INT, g3d_instances_set_alpha_cut_bgd),
+    FUNC("G3D_SET_LOD", "F", TYPE_INT, g3d_set_lod_bgd),
+    FUNC("G3D_WORLD_REBASE", "FFF", TYPE_INT, g3d_world_rebase_bgd),
+    FUNC("G3D_STREAM_INIT", "FI", TYPE_INT, g3d_stream_init_bgd),
+    FUNC("G3D_STREAM_UPDATE", "FF", TYPE_INT, g3d_stream_update_bgd),
+    FUNC("G3D_STREAM_LOAD_COUNT", "", TYPE_INT, g3d_stream_load_count_bgd),
+    FUNC("G3D_STREAM_LOAD_X", "I", TYPE_INT, g3d_stream_load_x_bgd),
+    FUNC("G3D_STREAM_LOAD_Z", "I", TYPE_INT, g3d_stream_load_z_bgd),
+    FUNC("G3D_STREAM_UNLOAD_COUNT", "", TYPE_INT, g3d_stream_unload_count_bgd),
+    FUNC("G3D_STREAM_UNLOAD_X", "I", TYPE_INT, g3d_stream_unload_x_bgd),
+    FUNC("G3D_STREAM_UNLOAD_Z", "I", TYPE_INT, g3d_stream_unload_z_bgd),
+    FUNC("G3D_STREAM_LOADED_COUNT", "", TYPE_INT, g3d_stream_loaded_count_bgd),
     FUNC("G3D_INSTANCES_SET_DISTANCE", "IF", TYPE_INT, g3d_instances_set_distance_bgd),
     FUNC("G3D_INSTANCES_CLEAR", "I", TYPE_INT, g3d_instances_clear_bgd),
     FUNC("G3D_INSTANCES_COUNT", "I", TYPE_INT, g3d_instances_count_bgd),
