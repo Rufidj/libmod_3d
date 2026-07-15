@@ -1198,9 +1198,10 @@ void g3d_renderer_cloud_pass(void) {
     g3d_shader_set_float(sh, "uCloudThick", thick);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    /* Pass 2: composite (bilinear upscale) into HDR with the cloud blend. */
+    /* Pass 2: composite (bilinear upscale) into HDR with the cloud blend.
+       HDR is at render size, so the viewport must be too. */
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.hdr_fbo);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_SRC_ALPHA);   /* dst*T + scat */
     g3d_shader_use(csh);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, g_renderer.cloud_tex); g3d_shader_set_int(csh, "uClouds", 0);
@@ -1432,7 +1433,11 @@ static void g3d_renderer_bind_scene_target(void) {
     if (g_renderer.framebuffer == g_renderer.target_fbo)
         glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
     else
-        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+        /* The internal buffer is at RENDER size, not display size. Using the
+           display size here draws the scene as if the screen were bigger and
+           only the corner that fits gets kept - the frame comes out cropped and
+           looks zoomed in, off-centre. */
+        glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 #endif
@@ -1513,8 +1518,8 @@ void g3d_renderer_render(void) {
         g3d_renderer_reflection_pass_plane(0.0f, g3d_water_get_level(), 0.0f,
                                            0.0f, 1.0f, 0.0f,
                                            g_renderer.refl_framebuffer,
-                                           g_renderer.display_width,
-                                           g_renderer.display_height);
+                                           g_renderer.render_width,
+                                           g_renderer.render_height);
     }
     /* Visible/near mirrors render the scene mirrored into their textures */
     g3d_mirror_render_reflections(g_renderer.active_camera);
