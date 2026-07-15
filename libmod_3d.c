@@ -553,6 +553,12 @@ int64_t g3d_gltf_set_recenter_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+/* Spatial chunking of map-scale models (-1 auto, 0 off, >0 cell size). */
+int64_t g3d_gltf_set_chunking_bgd(INSTANCE *my, int64_t *params) {
+    g3d_gltf_set_chunking(*(float *)&params[0]);
+    return 1;
+}
+
 int64_t g3d_model_load_gltf_fractured_bgd(INSTANCE *my, int64_t *params) {
     g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);

@@ -406,6 +406,179 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
     return mesh;
 }
 
+/* ============================================================================
+   SPATIAL CHUNKING
+
+   Submeshes are grouped by MATERIAL, which merges every node sharing it: one
+   submesh ends up holding that material's geometry scattered across the whole
+   map, so its AABB spans the map and no culling can ever reject it (measured on
+   Bistro: average submesh AABB = 21% of the map, 40 of them > 50%).
+
+   Splitting those by an XZ grid of triangle centroids gives each submesh
+   spatial locality, which is what makes frustum (and later occlusion) culling
+   and distance LOD actually mean something. Small, already-local submeshes are
+   left alone so props don't get shredded into extra draw calls.
+   ============================================================================
+ */
+
+/* Chunk cell size: -1 = auto (map-scale models only), 0 = off, >0 = explicit. */
+static float g_gltf_chunk_cell = -1.0f;
+void g3d_gltf_set_chunking(float cell) { g_gltf_chunk_cell = cell; }
+
+/* Build a mesh that TAKES OWNERSHIP of the buffers: no extra copy, and no
+   per-chunk log line (a map can produce thousands). */
+static void mesh_own_buffers(G3DMesh *m, const char *name, G3DVertex *v,
+                             uint32_t vc, uint32_t *idx, uint32_t ic) {
+    memset(m, 0, sizeof(*m));
+    m->id = 1;
+    strncpy(m->name, name, sizeof(m->name) - 1);
+    m->vertices = v;
+    m->vertex_count = vc;
+    m->indices = idx;
+    m->index_count = ic;
+    m->material_id = -1;
+    m->anim_node = -1;
+    g3d_mesh_calculate_bounds(m);
+}
+
+/* Split src into an XZ grid of `cell`-sized chunks by triangle centroid,
+   appending each non-empty cell to the list (all sharing src's texture).
+   Returns the number of chunks appended, or 0 if it wasn't worth splitting. */
+static int split_into_chunks(const G3DMesh *src, void *tex, float cell,
+                             G3DMesh **list, void ***tlist, int *count, int *cap) {
+    uint32_t ntri = src->index_count / 3;
+    if (ntri == 0 || cell <= 0.0f)
+        return 0;
+
+    float minx = src->aabb_min[0], minz = src->aabb_min[2];
+    float ex = src->aabb_max[0] - minx, ez = src->aabb_max[2] - minz;
+    int gx = (int)ceilf(ex / cell), gz = (int)ceilf(ez / cell);
+    if (gx < 1) gx = 1;
+    if (gz < 1) gz = 1;
+    if (gx * gz <= 1)
+        return 0;                       /* already fits one cell */
+    if ((long)gx * gz > 8192)           /* pathological: don't explode */
+        return 0;
+    int ncells = gx * gz;
+
+    /* Bucket triangles by cell with a counting sort. */
+    int *tricell = (int *)malloc((size_t)ntri * sizeof(int));
+    int *cnt = (int *)calloc((size_t)ncells + 1, sizeof(int));
+    if (!tricell || !cnt) { free(tricell); free(cnt); return 0; }
+    for (uint32_t t = 0; t < ntri; t++) {
+        const float *p0 = src->vertices[src->indices[t*3+0]].position;
+        const float *p1 = src->vertices[src->indices[t*3+1]].position;
+        const float *p2 = src->vertices[src->indices[t*3+2]].position;
+        float cx = (p0[0] + p1[0] + p2[0]) / 3.0f;
+        float cz = (p0[2] + p1[2] + p2[2]) / 3.0f;
+        int ix = (int)((cx - minx) / cell); if (ix < 0) ix = 0; if (ix >= gx) ix = gx - 1;
+        int iz = (int)((cz - minz) / cell); if (iz < 0) iz = 0; if (iz >= gz) iz = gz - 1;
+        int c = iz * gx + ix;
+        tricell[t] = c;
+        cnt[c]++;
+    }
+    int used = 0;
+    for (int c = 0; c < ncells; c++) if (cnt[c]) used++;
+    if (used <= 1) { free(tricell); free(cnt); return 0; }   /* all in one cell */
+
+    int *off = (int *)malloc(((size_t)ncells + 1) * sizeof(int));
+    if (!off) { free(tricell); free(cnt); return 0; }
+    off[0] = 0;
+    for (int c = 0; c < ncells; c++) off[c+1] = off[c] + cnt[c];
+    int *cur = (int *)malloc((size_t)ncells * sizeof(int));
+    uint32_t *order = (uint32_t *)malloc((size_t)ntri * sizeof(uint32_t));
+    if (!cur || !order) { free(tricell); free(cnt); free(off); free(cur); free(order); return 0; }
+    memcpy(cur, off, (size_t)ncells * sizeof(int));
+    for (uint32_t t = 0; t < ntri; t++) order[cur[tricell[t]]++] = t;
+
+    /* Per-cell vertex remap, stamped so it doesn't need clearing per cell. */
+    uint32_t *remap = (uint32_t *)malloc((size_t)src->vertex_count * sizeof(uint32_t));
+    int *stamp = (int *)calloc((size_t)src->vertex_count, sizeof(int));
+    if (!remap || !stamp) { free(tricell); free(cnt); free(off); free(cur); free(order); free(remap); free(stamp); return 0; }
+
+    int made = 0;
+    for (int c = 0; c < ncells; c++) {
+        int n = cnt[c];
+        if (!n) continue;
+        G3DVertex *cv = (G3DVertex *)malloc((size_t)n * 3 * sizeof(G3DVertex));
+        uint32_t *ci = (uint32_t *)malloc((size_t)n * 3 * sizeof(uint32_t));
+        if (!cv || !ci) { free(cv); free(ci); break; }
+        uint32_t vc = 0, ic = 0;
+        int gen = c + 1;
+        for (int k = off[c]; k < off[c] + n; k++) {
+            uint32_t t = order[k];
+            for (int e = 0; e < 3; e++) {
+                uint32_t vi = src->indices[t*3+e];
+                if (stamp[vi] != gen) {
+                    stamp[vi] = gen;
+                    remap[vi] = vc;
+                    cv[vc++] = src->vertices[vi];
+                }
+                ci[ic++] = remap[vi];
+            }
+        }
+        cv = (G3DVertex *)realloc(cv, (size_t)vc * sizeof(G3DVertex));
+        if (*count >= *cap) {
+            *cap = *cap ? *cap * 2 : 64;
+            *list = (G3DMesh *)realloc(*list, (size_t)*cap * sizeof(G3DMesh));
+            *tlist = (void **)realloc(*tlist, (size_t)*cap * sizeof(void *));
+        }
+        mesh_own_buffers(&(*list)[*count], "chunk", cv, vc, ci, ic);
+        (*tlist)[*count] = tex;      /* chunks share the material's texture */
+        (*count)++;
+        made++;
+    }
+
+    free(tricell); free(cnt); free(off); free(cur); free(order); free(remap); free(stamp);
+    return made;
+}
+
+/* Chunk every oversized submesh. Replaces the arrays with the new (larger) set.
+   cell <= 0 disables. */
+static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell) {
+    G3DMesh *src = *pmeshes;
+    void **stex = *ptex;
+    int n = *psub;
+
+    G3DMesh *list = NULL; void **tlist = NULL;
+    int count = 0, cap = 0;
+    int split_count = 0;
+
+    for (int s = 0; s < n; s++) {
+        int made = 0;
+        if (cell > 0.0f) {
+            float dx = src[s].aabb_max[0] - src[s].aabb_min[0];
+            float dz = src[s].aabb_max[2] - src[s].aabb_min[2];
+            /* Only bother when it actually spans more than a cell or so. */
+            if (dx > cell * 1.5f || dz > cell * 1.5f)
+                made = split_into_chunks(&src[s], stex[s], cell, &list, &tlist, &count, &cap);
+        }
+        if (made) {
+            split_count++;
+            free(src[s].vertices);      /* replaced by its chunks */
+            free(src[s].indices);
+        } else {
+            if (count >= cap) {
+                cap = cap ? cap * 2 : 64;
+                list = (G3DMesh *)realloc(list, (size_t)cap * sizeof(G3DMesh));
+                tlist = (void **)realloc(tlist, (size_t)cap * sizeof(void *));
+            }
+            list[count] = src[s];       /* keep as-is (takes ownership) */
+            tlist[count] = stex[s];
+            count++;
+        }
+    }
+
+    free(src);
+    free(stex);
+    *pmeshes = list;
+    *ptex = tlist;
+    *psub = count;
+    if (split_count)
+        printf("G3D: spatial chunking: %d/%d submeshes split (cell %.1f) -> %d submeshes\n",
+               split_count, n, cell, count);
+}
+
 /* Center the model on X/Z, rest it on Y=0 (feet at origin) and (re)upload all
    submeshes. Shared by load and orient. If out_off != NULL it receives the
    applied offset (used by skinned models, whose bind_pos stays un-offset). */
@@ -690,6 +863,40 @@ G3DModel *g3d_gltf_load(const char *filepath) {
         fprintf(stderr, "G3D: glTF has no triangle geometry: %s\n", filepath);
         free(anim_flag); free(meshes); free(textures); cgltf_free(data);
         return NULL;
+    }
+
+    /* Split map-scale submeshes into spatial chunks so culling/LOD have
+       something local to work with (see SPATIAL CHUNKING above). Runs before
+       the recenter/upload so it only moves CPU buffers around. */
+    {
+        float mn[3], mx[3];
+        for (int k = 0; k < 3; k++) { mn[k] = meshes[0].aabb_min[k]; mx[k] = meshes[0].aabb_max[k]; }
+        for (int s = 1; s < sub; s++)
+            for (int k = 0; k < 3; k++) {
+                if (meshes[s].aabb_min[k] < mn[k]) mn[k] = meshes[s].aabb_min[k];
+                if (meshes[s].aabb_max[k] > mx[k]) mx[k] = meshes[s].aabb_max[k];
+            }
+        float dx = mx[0] - mn[0], dz = mx[2] - mn[2];
+        float diag = sqrtf(dx*dx + dz*dz);
+        float cell = g_gltf_chunk_cell;
+        if (cell < 0.0f) {
+            /* Auto: only map-scale models. A prop or a character must NOT be
+               shredded into extra draw calls - splitting only pays off when the
+               camera can be inside the model's extent.
+               diag/6 measured on Bistro at street level: finer cells buy almost
+               no extra triangle savings (-16% at diag/6 vs -20% at diag/12) but
+               cost far more draw calls (341 vs 586). Coarse wins. */
+            cell = (diag > 40.0f) ? (diag / 6.0f) : 0.0f;
+        }
+        if (cell > 0.0f) {
+            chunk_model(&meshes, &textures, &sub, cell);
+            /* The chunked arrays are sized exactly: make room for the animated
+               node submeshes appended after the recenter. */
+            if (anim_node_meshes > 0) {
+                meshes = (G3DMesh *)realloc(meshes, (size_t)(sub + anim_node_meshes) * sizeof(G3DMesh));
+                textures = (void **)realloc(textures, (size_t)(sub + anim_node_meshes) * sizeof(void *));
+            }
+        }
     }
 
     /* Center on X/Z, rest on Y=0, upload. Capture the offset so skinned models
