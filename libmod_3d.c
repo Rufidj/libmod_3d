@@ -19,6 +19,10 @@
 #include "libmod_3d_flow.h"
 #include "libmod_3d_particles.h"
 #include "libmod_3d_sky.h"
+#include "libmod_3d_ibl.h"
+#include "libmod_3d_occlusion.h"
+#include "libmod_3d_smaa.h"
+#include "libmod_3d_fsr.h"
 #include "libmod_3d_physics.h"
 #include "libmod_3d_anim.h"
 #include "libmod_3d_collide.h"
@@ -583,6 +587,12 @@ int64_t g3d_gltf_set_recenter_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+/* Spatial chunking of map-scale models (-1 auto, 0 off, >0 cell size). */
+int64_t g3d_gltf_set_chunking_bgd(INSTANCE *my, int64_t *params) {
+    g3d_gltf_set_chunking(*(float *)&params[0]);
+    return 1;
+}
+
 int64_t g3d_model_load_gltf_fractured_bgd(INSTANCE *my, int64_t *params) {
     g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
@@ -675,6 +685,14 @@ int64_t g3d_model_animate_blend_bgd(INSTANCE *my, int64_t *params) {
     g3d_model_animate_blend(model, (int)params[1], *(float *)&params[2],
                             (int)params[3], *(float *)&params[4],
                             *(float *)&params[5], (int)params[6]);
+    return 1;
+}
+
+int64_t g3d_model_animate_all_bgd(INSTANCE *my, int64_t *params) {
+    G3DModel *model = (G3DModel *)(intptr_t)params[0];
+    float time = *(float *)&params[1];
+    int loop = (int)params[2];
+    g3d_model_animate_all(model, time, loop);
     return 1;
 }
 
@@ -914,30 +932,73 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
     if (root < 0) return -1;
     g3d_entity_impl_set_rotation(root, 0.0f, roty, 0.0f);
 
+    /* Submeshes that share the same maps share ONE material. Spatial chunking
+       splits a submesh into many chunks that all keep the source's textures, so
+       a material each would burn through the pool (a 158-unit map chunked at 1
+       unit made 9073 submeshes and hit "Max materials reached" 4984 times -
+       every one of those rendered untextured). Reusing also cuts state changes. */
+    void **key_alb = (void **)calloc(model->mesh_count, sizeof(void *));
+    void **key_nrm = (void **)calloc(model->mesh_count, sizeof(void *));
+    void **key_met = (void **)calloc(model->mesh_count, sizeof(void *));
+    void **key_rgh = (void **)calloc(model->mesh_count, sizeof(void *));
+    int *key_mat = (int *)calloc(model->mesh_count, sizeof(int));
+    int key_count = 0;
+
     for (uint32_t j = 0; j < model->mesh_count; j++) {
-        int mat = g3d_material_impl_create();
-        G3DMaterial *m = g3d_material_impl_get(mat);
-        if (m) {
-            void *alb = model->mesh_textures ? model->mesh_textures[j] : NULL;
-            m->albedo_texture = alb;
-            m->albedo_texture_id = alb ? 0 : -1;
-            /* Static map/prop geometry is matte: a glossy default (0.5) puts a
-               grazing specular sheen on flat ground toward the horizon that reads
-               as a bright "seam". High roughness keeps it flat and even. */
-            m->roughness = 0.9f;
-            m->metallic  = 0.0f;
-            if (model->mesh_normal && model->mesh_normal[j])       g3d_material_impl_set_map(mat, 1, model->mesh_normal[j]);
-            if (model->mesh_metallic && model->mesh_metallic[j])   g3d_material_impl_set_map(mat, 2, model->mesh_metallic[j]);
-            if (model->mesh_roughness && model->mesh_roughness[j]) g3d_material_impl_set_map(mat, 3, model->mesh_roughness[j]);
+        void *alb = model->mesh_textures ? model->mesh_textures[j] : NULL;
+        void *nrm = model->mesh_normal ? model->mesh_normal[j] : NULL;
+        void *met = model->mesh_metallic ? model->mesh_metallic[j] : NULL;
+        void *rgh = model->mesh_roughness ? model->mesh_roughness[j] : NULL;
+
+        int mat = -1;
+        if (key_mat) {
+            for (int k = 0; k < key_count; k++) {
+                if (key_alb[k] == alb && key_nrm[k] == nrm &&
+                    key_met[k] == met && key_rgh[k] == rgh) {
+                    mat = key_mat[k];
+                    break;
+                }
+            }
+        }
+        if (mat < 0) {
+            mat = g3d_material_impl_create();
+            G3DMaterial *m = g3d_material_impl_get(mat);
+            if (m) {
+                m->albedo_texture = alb;
+                m->albedo_texture_id = alb ? 0 : -1;
+                /* Static map/prop geometry is matte: a glossy default (0.5) puts a
+                   grazing specular sheen on flat ground toward the horizon that reads
+                   as a bright "seam". High roughness keeps it flat and even. */
+                m->roughness = 0.9f;
+                m->metallic  = 0.0f;
+                if (nrm) g3d_material_impl_set_map(mat, 1, nrm);
+                if (met) g3d_material_impl_set_map(mat, 2, met);
+                if (rgh) g3d_material_impl_set_map(mat, 3, rgh);
+            }
+            if (key_mat && mat >= 0) {
+                key_alb[key_count] = alb; key_nrm[key_count] = nrm;
+                key_met[key_count] = met; key_rgh[key_count] = rgh;
+                key_mat[key_count] = mat;
+                key_count++;
+            }
         }
         int ent = g3d_entity_impl_spawn(scene_id, 0, 0.0f, 0.0f, 0.0f);
         if (ent < 0) continue;
         G3DEntity *e = g3d_entity_impl_get(ent);
-        if (e) e->mesh = &model->meshes[j];
+        if (e) {
+            e->mesh = &model->meshes[j];
+            /* Node-animated submesh: keep a back-pointer so the renderer can
+               apply model->node_global[anim_node] every frame. */
+            e->anim_model = (model->meshes[j].anim_node >= 0) ? (void *)model : NULL;
+        }
         g3d_entity_impl_set_material(ent, mat);
         g3d_entity_impl_set_scale(ent, s, s, s);
         g3d_entity_impl_set_parent(ent, root);               /* child of the root -> moves with it */
     }
+    if (model->mesh_count > (uint32_t)key_count)
+        printf("G3D: model spawn: %u submeshes sharing %d materials\n",
+               model->mesh_count, key_count);
+    free(key_alb); free(key_nrm); free(key_met); free(key_rgh); free(key_mat);
 
     /* Far-LOD: one merged, decimated mesh drawn (with the model albedo) instead
        of all the submesh children when the model is beyond g3d_set_lod distance. */
@@ -1128,6 +1189,73 @@ int64_t g3d_set_shadows_bgd(INSTANCE *my, int64_t *params) {
 /* HDR post pipeline */
 int64_t g3d_set_hdr_bgd(INSTANCE *my, int64_t *params) {
     g3d_renderer_set_hdr((int)params[0]);
+    return 1;
+}
+/* Image based lighting: real reflections/ambient captured from the sky.
+   intensity scales it (1.0 = the sky's own radiance). */
+int64_t g3d_set_ibl_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ibl_set_enabled((int)params[0]);
+    g3d_ibl_set_intensity(*(float *)&params[1]);
+    return 1;
+}
+/* Occlusion culling: skip geometry fully hidden behind other geometry. */
+int64_t g3d_set_occlusion_bgd(INSTANCE *my, int64_t *params) {
+    g3d_occlusion_set_enabled((int)params[0]);
+    return 1;
+}
+/* SMAA 1x anti-aliasing (also the prerequisite for a spatial upscaler). */
+int64_t g3d_set_smaa_bgd(INSTANCE *my, int64_t *params) {
+    g3d_smaa_set_enabled((int)params[0]);
+    return 1;
+}
+/* FSR 1 upscaling: render at `scale` of the display and upscale back.
+   scale 1.0 = native (nothing to upscale). 0.667 = "quality" 1080p<-720p. */
+int64_t g3d_set_fsr_bgd(INSTANCE *my, int64_t *params) {
+    int on = (int)params[0];
+    float scale = *(float *)&params[1];
+    float sharp = *(float *)&params[2];
+    g3d_fsr_set_enabled(on);
+    g3d_fsr_set_sharpness(sharp);
+    g3d_renderer_set_render_scale(on ? scale : 1.0f);
+    return 1;
+}
+
+/* Same, but say the render resolution in pixels instead of a fraction: you
+   think "render at 720p and upscale to whatever the window is", not "0.5".
+   Survives a set_mode change, which a fixed fraction wouldn't. The height
+   drives it (the aspect ratio comes from the display). */
+int64_t g3d_set_fsr_height_bgd(INSTANCE *my, int64_t *params) {
+    int on = (int)params[0];
+    int render_h = (int)params[1];
+    float sharp = *(float *)&params[2];
+    uint32_t dw = 0, dh = 0;
+    g3d_renderer_get_display_size(&dw, &dh);
+    g3d_fsr_set_enabled(on);
+    g3d_fsr_set_sharpness(sharp);
+    if (!on || render_h <= 0 || dh == 0) {
+        g3d_renderer_set_render_scale(1.0f);
+        return 1;
+    }
+    float scale = (float)render_h / (float)dh;
+    if (scale > 1.0f) scale = 1.0f;   /* never render above the display */
+    g3d_renderer_set_render_scale(scale);
+    return 1;
+}
+/* Actual internal render size, so a demo can show what is really happening
+   instead of what it asked for. */
+int64_t g3d_render_width_bgd(INSTANCE *my, int64_t *params) {
+    uint32_t w = 0, h = 0;
+    g3d_renderer_get_render_size(&w, &h);
+    return (int64_t)w;
+}
+int64_t g3d_render_height_bgd(INSTANCE *my, int64_t *params) {
+    uint32_t w = 0, h = 0;
+    g3d_renderer_get_render_size(&w, &h);
+    return (int64_t)h;
+}
+/* Force a re-capture (day/night cycles, a sun that moves at runtime). */
+int64_t g3d_ibl_refresh_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ibl_invalidate();
     return 1;
 }
 int64_t g3d_set_exposure_bgd(INSTANCE *my, int64_t *params) {

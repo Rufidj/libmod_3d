@@ -57,6 +57,12 @@ G3DModel *g3d_gltf_load_fractured(const char *filepath);
    For models whose authored bind pose comes tilted. */
 void g3d_model_orient(G3DModel *model, float rx, float ry, float rz);
 
+/* Spatial chunking of map-scale models at load time. Material grouping merges a
+   material's geometry across the whole map, leaving submeshes whose AABB spans
+   everything - nothing culls. Splitting them on an XZ grid restores locality so
+   frustum/occlusion culling and LOD work. cell: -1 = auto, 0 = off, >0 = size. */
+void g3d_gltf_set_chunking(float cell);
+
 /**
  * Free glTF model and all associated resources
  */

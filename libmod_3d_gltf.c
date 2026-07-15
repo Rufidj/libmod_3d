@@ -254,7 +254,8 @@ static G3DTexture *gltf_load_base_color(cgltf_material *mat,
    (used by the fracture loader: one submesh per node/chunk). Returns NULL if
    none. */
 static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
-                              cgltf_node *only_node) {
+                              cgltf_node *only_node,
+                              const char *skip_node, int force_local) {
     uint32_t cap_v = 4096;   /* grows as needed (uint32 indices, no hard cap) */
     G3DVertex *verts = (G3DVertex *)malloc(cap_v * sizeof(G3DVertex));
     uint32_t *indices = NULL;
@@ -271,12 +272,18 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
             continue;
         if (only_node && node != only_node)
             continue;
+        /* Animated nodes are pulled out into their own local-space submeshes;
+           exclude them here so the static baked geometry doesn't draw them too. */
+        if (skip_node && skip_node[ni])
+            continue;
 
         /* Skinned meshes: the raw vertex positions are already the bind pose
            (jointWorld * inverseBind = identity at bind), so do NOT apply the
-           node transform. Static meshes: bake the node's world transform. */
+           node transform. force_local keeps a node-animated submesh in its own
+           local space (the renderer applies node_global each frame). Otherwise
+           bake the node's world transform (static geometry). */
         float M[16];
-        if (node->skin) {
+        if (node->skin || force_local) {
             for (int k = 0; k < 16; k++) M[k] = 0.0f;
             M[0] = M[5] = M[10] = M[15] = 1.0f;
         } else {
@@ -399,6 +406,192 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
     return mesh;
 }
 
+/* ============================================================================
+   SPATIAL CHUNKING
+
+   Submeshes are grouped by MATERIAL, which merges every node sharing it: one
+   submesh ends up holding that material's geometry scattered across the whole
+   map, so its AABB spans the map and no culling can ever reject it (measured on
+   Bistro: average submesh AABB = 21% of the map, 40 of them > 50%).
+
+   Splitting those by an XZ grid of triangle centroids gives each submesh
+   spatial locality, which is what makes frustum (and later occlusion) culling
+   and distance LOD actually mean something. Small, already-local submeshes are
+   left alone so props don't get shredded into extra draw calls.
+   ============================================================================
+ */
+
+/* Chunk cell size: -1 = auto (map-scale models only), 0 = off, >0 = explicit.
+   Auto by default. Measured with TEST_FLYBENCH over a full pass through Bistro,
+   in a real window (average FPS of the whole route):
+
+     chunking  occlusion   FPS
+     off       off         731.7
+     off       ON          736.2   (+0.6%  - occlusion has nothing to reject)
+     auto      off         710.1   (-3%    - the extra draws, no payoff alone)
+     auto      ON          794.7   (+11.9% over its own baseline, +8.6% overall)
+
+   Chunking barely pays on its own, but it is what lets occlusion culling work
+   at all: unchunked, a submesh's AABB spans the map, so something in it is
+   always visible and the test can never reject it (+0.6%). Chunked, the same
+   test is worth +11.9%. The pair is the win, neither half alone. */
+static float g_gltf_chunk_cell = -1.0f;
+void g3d_gltf_set_chunking(float cell) { g_gltf_chunk_cell = cell; }
+
+/* Build a mesh that TAKES OWNERSHIP of the buffers: no extra copy, and no
+   per-chunk log line (a map can produce thousands). */
+static void mesh_own_buffers(G3DMesh *m, const char *name, G3DVertex *v,
+                             uint32_t vc, uint32_t *idx, uint32_t ic) {
+    memset(m, 0, sizeof(*m));
+    m->id = 1;
+    strncpy(m->name, name, sizeof(m->name) - 1);
+    m->vertices = v;
+    m->vertex_count = vc;
+    m->indices = idx;
+    m->index_count = ic;
+    m->material_id = -1;
+    m->anim_node = -1;
+    g3d_mesh_calculate_bounds(m);
+}
+
+/* Split src into an XZ grid of `cell`-sized chunks by triangle centroid,
+   appending each non-empty cell to the list (all sharing src's texture).
+   Returns the number of chunks appended, or 0 if it wasn't worth splitting. */
+static int split_into_chunks(const G3DMesh *src, void *tex, float cell,
+                             G3DMesh **list, void ***tlist, int *count, int *cap) {
+    uint32_t ntri = src->index_count / 3;
+    if (ntri == 0 || cell <= 0.0f)
+        return 0;
+
+    float minx = src->aabb_min[0], minz = src->aabb_min[2];
+    float ex = src->aabb_max[0] - minx, ez = src->aabb_max[2] - minz;
+    int gx = (int)ceilf(ex / cell), gz = (int)ceilf(ez / cell);
+    if (gx < 1) gx = 1;
+    if (gz < 1) gz = 1;
+    if (gx * gz <= 1)
+        return 0;                       /* already fits one cell */
+    if ((long)gx * gz > 8192)           /* pathological: don't explode */
+        return 0;
+    int ncells = gx * gz;
+
+    /* Bucket triangles by cell with a counting sort. */
+    int *tricell = (int *)malloc((size_t)ntri * sizeof(int));
+    int *cnt = (int *)calloc((size_t)ncells + 1, sizeof(int));
+    if (!tricell || !cnt) { free(tricell); free(cnt); return 0; }
+    for (uint32_t t = 0; t < ntri; t++) {
+        const float *p0 = src->vertices[src->indices[t*3+0]].position;
+        const float *p1 = src->vertices[src->indices[t*3+1]].position;
+        const float *p2 = src->vertices[src->indices[t*3+2]].position;
+        float cx = (p0[0] + p1[0] + p2[0]) / 3.0f;
+        float cz = (p0[2] + p1[2] + p2[2]) / 3.0f;
+        int ix = (int)((cx - minx) / cell); if (ix < 0) ix = 0; if (ix >= gx) ix = gx - 1;
+        int iz = (int)((cz - minz) / cell); if (iz < 0) iz = 0; if (iz >= gz) iz = gz - 1;
+        int c = iz * gx + ix;
+        tricell[t] = c;
+        cnt[c]++;
+    }
+    int used = 0;
+    for (int c = 0; c < ncells; c++) if (cnt[c]) used++;
+    if (used <= 1) { free(tricell); free(cnt); return 0; }   /* all in one cell */
+
+    int *off = (int *)malloc(((size_t)ncells + 1) * sizeof(int));
+    if (!off) { free(tricell); free(cnt); return 0; }
+    off[0] = 0;
+    for (int c = 0; c < ncells; c++) off[c+1] = off[c] + cnt[c];
+    int *cur = (int *)malloc((size_t)ncells * sizeof(int));
+    uint32_t *order = (uint32_t *)malloc((size_t)ntri * sizeof(uint32_t));
+    if (!cur || !order) { free(tricell); free(cnt); free(off); free(cur); free(order); return 0; }
+    memcpy(cur, off, (size_t)ncells * sizeof(int));
+    for (uint32_t t = 0; t < ntri; t++) order[cur[tricell[t]]++] = t;
+
+    /* Per-cell vertex remap, stamped so it doesn't need clearing per cell. */
+    uint32_t *remap = (uint32_t *)malloc((size_t)src->vertex_count * sizeof(uint32_t));
+    int *stamp = (int *)calloc((size_t)src->vertex_count, sizeof(int));
+    if (!remap || !stamp) { free(tricell); free(cnt); free(off); free(cur); free(order); free(remap); free(stamp); return 0; }
+
+    int made = 0;
+    for (int c = 0; c < ncells; c++) {
+        int n = cnt[c];
+        if (!n) continue;
+        G3DVertex *cv = (G3DVertex *)malloc((size_t)n * 3 * sizeof(G3DVertex));
+        uint32_t *ci = (uint32_t *)malloc((size_t)n * 3 * sizeof(uint32_t));
+        if (!cv || !ci) { free(cv); free(ci); break; }
+        uint32_t vc = 0, ic = 0;
+        int gen = c + 1;
+        for (int k = off[c]; k < off[c] + n; k++) {
+            uint32_t t = order[k];
+            for (int e = 0; e < 3; e++) {
+                uint32_t vi = src->indices[t*3+e];
+                if (stamp[vi] != gen) {
+                    stamp[vi] = gen;
+                    remap[vi] = vc;
+                    cv[vc++] = src->vertices[vi];
+                }
+                ci[ic++] = remap[vi];
+            }
+        }
+        cv = (G3DVertex *)realloc(cv, (size_t)vc * sizeof(G3DVertex));
+        if (*count >= *cap) {
+            *cap = *cap ? *cap * 2 : 64;
+            *list = (G3DMesh *)realloc(*list, (size_t)*cap * sizeof(G3DMesh));
+            *tlist = (void **)realloc(*tlist, (size_t)*cap * sizeof(void *));
+        }
+        mesh_own_buffers(&(*list)[*count], "chunk", cv, vc, ci, ic);
+        (*tlist)[*count] = tex;      /* chunks share the material's texture */
+        (*count)++;
+        made++;
+    }
+
+    free(tricell); free(cnt); free(off); free(cur); free(order); free(remap); free(stamp);
+    return made;
+}
+
+/* Chunk every oversized submesh. Replaces the arrays with the new (larger) set.
+   cell <= 0 disables. */
+static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell) {
+    G3DMesh *src = *pmeshes;
+    void **stex = *ptex;
+    int n = *psub;
+
+    G3DMesh *list = NULL; void **tlist = NULL;
+    int count = 0, cap = 0;
+    int split_count = 0;
+
+    for (int s = 0; s < n; s++) {
+        int made = 0;
+        if (cell > 0.0f) {
+            float dx = src[s].aabb_max[0] - src[s].aabb_min[0];
+            float dz = src[s].aabb_max[2] - src[s].aabb_min[2];
+            /* Only bother when it actually spans more than a cell or so. */
+            if (dx > cell * 1.5f || dz > cell * 1.5f)
+                made = split_into_chunks(&src[s], stex[s], cell, &list, &tlist, &count, &cap);
+        }
+        if (made) {
+            split_count++;
+            free(src[s].vertices);      /* replaced by its chunks */
+            free(src[s].indices);
+        } else {
+            if (count >= cap) {
+                cap = cap ? cap * 2 : 64;
+                list = (G3DMesh *)realloc(list, (size_t)cap * sizeof(G3DMesh));
+                tlist = (void **)realloc(tlist, (size_t)cap * sizeof(void *));
+            }
+            list[count] = src[s];       /* keep as-is (takes ownership) */
+            tlist[count] = stex[s];
+            count++;
+        }
+    }
+
+    free(src);
+    free(stex);
+    *pmeshes = list;
+    *ptex = tlist;
+    *psub = count;
+    if (split_count)
+        printf("G3D: spatial chunking: %d/%d submeshes split (cell %.1f) -> %d submeshes\n",
+               split_count, n, cell, count);
+}
+
 /* Center the model on X/Z, rest it on Y=0 (feet at origin) and (re)upload all
    submeshes. Shared by load and orient. If out_off != NULL it receives the
    applied offset (used by skinned models, whose bind_pos stays un-offset). */
@@ -489,7 +682,11 @@ static void decompose_matrix(const float *m, Vec3 *t, Quat *r, Vec3 *s) {
    animations into the model. Must run while cgltf `data` (and its buffers) are
    still alive. Returns 1 if the model is skinned. */
 static int build_skeleton(cgltf_data *data, G3DModel *model) {
-    if (data->skins_count == 0 || data->nodes_count == 0)
+    /* Load the node hierarchy + animations whenever the model has nodes and
+       animations, even with NO skin: a Bistro-style scene animates plain nodes
+       (awnings, fans, a basket) via TRS channels, no bones involved. */
+    if (data->nodes_count == 0 ||
+        (data->skins_count == 0 && data->animations_count == 0))
         return 0;
 
     int nc = (int)data->nodes_count;
@@ -519,26 +716,27 @@ static int build_skeleton(cgltf_data *data, G3DModel *model) {
         model->node_base_s[i] = s; model->node_cur_s[i] = s;
     }
 
-    cgltf_skin *skin = &data->skins[0];
-    int jc = (int)skin->joints_count;
-    model->joint_count = jc;
-    model->joint_node = (int *)malloc(jc * sizeof(int));
-    model->inverse_bind = (Mat4 *)malloc(jc * sizeof(Mat4));
-    model->joint_matrix = (Mat4 *)malloc(jc * sizeof(Mat4));
-    for (int j = 0; j < jc; j++) {
-        model->joint_node[j] = (int)(skin->joints[j] - data->nodes);
-        Mat4 ib = mat4_identity();
-        if (skin->inverse_bind_matrices) {
-            float f[16];
-            cgltf_accessor_read_float(skin->inverse_bind_matrices, j, f, 16);
-            for (int k = 0; k < 16; k++) ib.m[k] = f[k];
+    int skinned = (data->skins_count > 0);
+    if (skinned) {
+        cgltf_skin *skin = &data->skins[0];
+        int jc = (int)skin->joints_count;
+        model->joint_count = jc;
+        model->joint_node = (int *)malloc(jc * sizeof(int));
+        model->inverse_bind = (Mat4 *)malloc(jc * sizeof(Mat4));
+        model->joint_matrix = (Mat4 *)malloc(jc * sizeof(Mat4));
+        for (int j = 0; j < jc; j++) {
+            model->joint_node[j] = (int)(skin->joints[j] - data->nodes);
+            Mat4 ib = mat4_identity();
+            if (skin->inverse_bind_matrices) {
+                float f[16];
+                cgltf_accessor_read_float(skin->inverse_bind_matrices, j, f, 16);
+                for (int k = 0; k < 16; k++) ib.m[k] = f[k];
+            }
+            model->inverse_bind[j] = ib;
         }
-        model->inverse_bind[j] = ib;
-    }
 
-    /* Topmost joint = the joint whose parent is not itself a joint. Used to
-       strip root motion (keep the character animating in place). */
-    {
+        /* Topmost joint = the joint whose parent is not itself a joint. Used to
+           strip root motion (keep the character animating in place). */
         char *is_joint = (char *)calloc(nc, 1);
         for (int j = 0; j < jc; j++) is_joint[model->joint_node[j]] = 1;
         model->root_node = -1;
@@ -548,8 +746,8 @@ static int build_skeleton(cgltf_data *data, G3DModel *model) {
             if (p < 0 || !is_joint[p]) { model->root_node = nd; break; }
         }
         free(is_joint);
+        model->lock_root = 1;   /* default: in-place preview */
     }
-    model->lock_root = 1;   /* default: in-place preview */
 
     int ac = (int)data->animations_count;
     model->animation_count = ac;
@@ -594,7 +792,7 @@ static int build_skeleton(cgltf_data *data, G3DModel *model) {
         A->duration = dur;
     }
 
-    model->skinned = 1;
+    model->skinned = skinned;   /* 0 for node-only animation (no bones) */
     return 1;
 }
 
@@ -616,15 +814,46 @@ G3DModel *g3d_gltf_load(const char *filepath) {
         return NULL;
     }
 
-    /* One submesh per material (+ one for material-less primitives) so each
-       part keeps its own base-colour texture. */
-    int max_sub = (int)data->materials_count + 1;
+    /* Mark the nodes an animation drives, then flag every mesh-carrying node in
+       their SUBTREES: animating a node moves its whole hierarchy (glTF
+       semantics), and the mesh often sits on a child (e.g. a basket whose
+       animated parent is an empty). Each such node becomes its own local-space
+       submesh (animated via its node_global, which composes the parent chain),
+       so the static material-grouped build must skip them. */
+    size_t ncnt = data->nodes_count ? data->nodes_count : 1;
+    char *anim_root = (char *)calloc(ncnt, 1);
+    char *anim_flag = (char *)calloc(ncnt, 1);
+    int anim_node_meshes = 0;
+    for (cgltf_size a = 0; a < data->animations_count; a++) {
+        cgltf_animation *ga = &data->animations[a];
+        for (cgltf_size c = 0; c < ga->channels_count; c++) {
+            cgltf_node *tn = ga->channels[c].target_node;
+            if (!tn) continue;
+            cgltf_size ni = (cgltf_size)(tn - data->nodes);
+            if (ni < data->nodes_count) anim_root[ni] = 1;
+        }
+    }
+    for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
+        if (!data->nodes[ni].mesh) continue;
+        /* Is this node itself, or any ancestor, animation-driven? */
+        int under = 0;
+        for (cgltf_node *p = &data->nodes[ni]; p; p = p->parent) {
+            if (anim_root[(cgltf_size)(p - data->nodes)]) { under = 1; break; }
+        }
+        if (under) { anim_flag[ni] = 1; anim_node_meshes++; }
+    }
+    free(anim_root);
+
+    /* One submesh per material (+ one for material-less primitives) so each part
+       keeps its own base-colour texture, plus room for one submesh per animated
+       node. */
+    int max_sub = (int)data->materials_count + 1 + anim_node_meshes;
     G3DMesh *meshes = (G3DMesh *)calloc(max_sub, sizeof(G3DMesh));
     void **textures = (void **)calloc(max_sub, sizeof(void *));
     int sub = 0;
 
     for (cgltf_size m = 0; m < data->materials_count; m++) {
-        G3DMesh *sm = build_submesh(data, &data->materials[m], NULL);
+        G3DMesh *sm = build_submesh(data, &data->materials[m], NULL, anim_flag, 0);
         if (!sm)
             continue;
         meshes[sub] = *sm;           /* copy mesh struct into the array */
@@ -634,7 +863,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     }
     /* Primitives without a material */
     {
-        G3DMesh *sm = build_submesh(data, NULL, NULL);
+        G3DMesh *sm = build_submesh(data, NULL, NULL, anim_flag, 0);
         if (sm) {
             meshes[sub] = *sm;
             free(sm);
@@ -645,14 +874,94 @@ G3DModel *g3d_gltf_load(const char *filepath) {
 
     if (sub == 0) {
         fprintf(stderr, "G3D: glTF has no triangle geometry: %s\n", filepath);
-        free(meshes); free(textures); cgltf_free(data);
+        free(anim_flag); free(meshes); free(textures); cgltf_free(data);
         return NULL;
+    }
+
+    /* Split map-scale submeshes into spatial chunks so culling/LOD have
+       something local to work with (see SPATIAL CHUNKING above). Runs before
+       the recenter/upload so it only moves CPU buffers around. */
+    {
+        float mn[3], mx[3];
+        for (int k = 0; k < 3; k++) { mn[k] = meshes[0].aabb_min[k]; mx[k] = meshes[0].aabb_max[k]; }
+        for (int s = 1; s < sub; s++)
+            for (int k = 0; k < 3; k++) {
+                if (meshes[s].aabb_min[k] < mn[k]) mn[k] = meshes[s].aabb_min[k];
+                if (meshes[s].aabb_max[k] > mx[k]) mx[k] = meshes[s].aabb_max[k];
+            }
+        float dx = mx[0] - mn[0], dz = mx[2] - mn[2];
+        float diag = sqrtf(dx*dx + dz*dz);
+        float cell = g_gltf_chunk_cell;
+        /* Clamp: a cell far smaller than the map shatters it into thousands of
+           submeshes. Each one spawns an entity, and the pools are finite - at 1
+           unit on this 158-unit map that meant 9073 submeshes and the material
+           pool running dry, leaving thousands of chunks rendering untextured.
+           A 32x32 grid over the model is already far finer than culling needs. */
+        if (cell > 0.0f && diag > 0.0f && cell < diag / 32.0f) {
+            printf("G3D: chunk cell %.2f too small for a %.1f model: clamped to %.2f\n",
+                   cell, diag, diag / 32.0f);
+            cell = diag / 32.0f;
+        }
+        if (cell < 0.0f) {
+            /* Auto: only map-scale models. A prop or a character must NOT be
+               shredded into extra draw calls - splitting only pays off when the
+               camera can be inside the model's extent.
+               diag/6 measured on Bistro at street level: finer cells buy almost
+               no extra triangle savings (-16% at diag/6 vs -20% at diag/12) but
+               cost far more draw calls (341 vs 586). Coarse wins. */
+            cell = (diag > 40.0f) ? (diag / 6.0f) : 0.0f;
+        }
+        if (cell > 0.0f) {
+            chunk_model(&meshes, &textures, &sub, cell);
+            /* The chunked arrays are sized exactly: make room for the animated
+               node submeshes appended after the recenter. */
+            if (anim_node_meshes > 0) {
+                meshes = (G3DMesh *)realloc(meshes, (size_t)(sub + anim_node_meshes) * sizeof(G3DMesh));
+                textures = (void **)realloc(textures, (size_t)(sub + anim_node_meshes) * sizeof(void *));
+            }
+        }
     }
 
     /* Center on X/Z, rest on Y=0, upload. Capture the offset so skinned models
        (whose bind_pos stays un-offset) can re-apply it after skinning. */
     float off[3] = {0, 0, 0};
     model_recenter_upload_off(meshes, sub, off);
+
+    /* Build one LOCAL-space submesh per animated node (after recenter so it is
+       NOT baked/offset). Its AABB is stored in model space (rest node world +
+       off) so frustum culling still works; the renderer applies node_global
+       each frame. */
+    for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
+        if (!anim_flag[ni]) continue;
+        cgltf_node *node = &data->nodes[ni];
+        G3DMesh *sm = build_submesh(data, NULL, node, NULL, 1);
+        if (!sm) continue;
+        sm->anim_node = (int)ni;
+        float M[16];
+        cgltf_node_transform_world(node, M);   /* rest world transform */
+        float mn[3] = { 1e30f, 1e30f, 1e30f }, mx[3] = { -1e30f, -1e30f, -1e30f };
+        for (uint32_t v = 0; v < sm->vertex_count; v++) {
+            float *p = sm->vertices[v].position;
+            float w[3] = {
+                M[0]*p[0] + M[4]*p[1] + M[8]*p[2]  + M[12] + off[0],
+                M[1]*p[0] + M[5]*p[1] + M[9]*p[2]  + M[13] + off[1],
+                M[2]*p[0] + M[6]*p[1] + M[10]*p[2] + M[14] + off[2],
+            };
+            for (int k = 0; k < 3; k++) {
+                if (w[k] < mn[k]) mn[k] = w[k];
+                if (w[k] > mx[k]) mx[k] = w[k];
+            }
+        }
+        for (int k = 0; k < 3; k++) { sm->aabb_min[k] = mn[k]; sm->aabb_max[k] = mx[k]; }
+        g3d_mesh_upload_gpu(sm);
+        meshes[sub] = *sm;
+        free(sm);
+        cgltf_material *nmat = (node->mesh->primitives_count > 0)
+                             ? node->mesh->primitives[0].material : NULL;
+        textures[sub] = nmat ? gltf_load_base_color(nmat, filepath) : NULL;
+        sub++;
+    }
+    free(anim_flag);
 
     G3DModel *model = (G3DModel *)calloc(1, sizeof(G3DModel));
     if (!model) { free(meshes); free(textures); cgltf_free(data); return NULL; }
@@ -717,7 +1026,7 @@ G3DModel *g3d_gltf_load_fractured(const char *filepath) {
         cgltf_node *node = &data->nodes[ni];
         if (!node->mesh)
             continue;
-        G3DMesh *sm = build_submesh(data, NULL, node);
+        G3DMesh *sm = build_submesh(data, NULL, node, NULL, 0);
         if (!sm)
             continue;
         meshes[sub] = *sm;

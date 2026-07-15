@@ -81,6 +81,7 @@ int64_t g3d_camera_set_projection_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_set_fov_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_gltf_set_recenter_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_gltf_set_chunking_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_gltf_fractured_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_obj_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_fbx_bgd(INSTANCE *my, int64_t *params);
@@ -94,6 +95,7 @@ int64_t g3d_model_anim_count_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_anim_duration_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_animate_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_animate_blend_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_model_animate_all_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_rest_pose_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_lock_root_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_collider_bgd(INSTANCE *my, int64_t *params);
@@ -150,6 +152,14 @@ int64_t g3d_mouse_dy_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_wireframe_mode_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_shadows_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_hdr_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_ibl_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_occlusion_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_smaa_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_fsr_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_fsr_height_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_render_width_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_render_height_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_ibl_refresh_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_exposure_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_bloom_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_tonemap_bgd(INSTANCE *my, int64_t *params);
@@ -342,6 +352,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CAMERA_SET_FOV", "IF", TYPE_INT, g3d_camera_set_fov_bgd),
     FUNC("G3D_LOAD_GLTF", "S", TYPE_INT, g3d_model_load_gltf_bgd),
     FUNC("G3D_GLTF_SET_RECENTER", "I", TYPE_INT, g3d_gltf_set_recenter_bgd),
+    FUNC("G3D_GLTF_SET_CHUNKING", "F", TYPE_INT, g3d_gltf_set_chunking_bgd),
     FUNC("G3D_LOAD_GLTF_FRACTURED", "S", TYPE_INT, g3d_model_load_gltf_fractured_bgd),
     FUNC("G3D_LOAD_OBJ", "S", TYPE_INT, g3d_model_load_obj_bgd),
     FUNC("G3D_LOAD_FBX", "S", TYPE_INT, g3d_model_load_fbx_bgd),
@@ -355,6 +366,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_MODEL_ANIM_DURATION", "II", TYPE_FLOAT, g3d_model_anim_duration_bgd),
     FUNC("G3D_MODEL_ANIMATE", "IIFI", TYPE_INT, g3d_model_animate_bgd),
     FUNC("G3D_MODEL_ANIMATE_BLEND", "IIFIFFI", TYPE_INT, g3d_model_animate_blend_bgd),
+    FUNC("G3D_MODEL_ANIMATE_ALL", "IFI", TYPE_INT, g3d_model_animate_all_bgd),
     FUNC("G3D_MODEL_REST_POSE", "I", TYPE_INT, g3d_model_rest_pose_bgd),
     FUNC("G3D_MODEL_LOCK_ROOT", "II", TYPE_INT, g3d_model_lock_root_bgd),
     FUNC("G3D_ENTITY_SET_COLLIDER", "II", TYPE_INT, g3d_entity_set_collider_bgd),
@@ -461,6 +473,14 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_SET_WIREFRAME_MODE", "I", TYPE_INT, g3d_set_wireframe_mode_bgd),
     FUNC("G3D_SET_SHADOWS", "I", TYPE_INT, g3d_set_shadows_bgd),
     FUNC("G3D_SET_HDR", "I", TYPE_INT, g3d_set_hdr_bgd),
+    FUNC("G3D_SET_IBL", "IF", TYPE_INT, g3d_set_ibl_bgd),
+    FUNC("G3D_SET_OCCLUSION", "I", TYPE_INT, g3d_set_occlusion_bgd),
+    FUNC("G3D_SET_SMAA", "I", TYPE_INT, g3d_set_smaa_bgd),
+    FUNC("G3D_SET_FSR", "IFF", TYPE_INT, g3d_set_fsr_bgd),
+    FUNC("G3D_SET_FSR_HEIGHT", "IIF", TYPE_INT, g3d_set_fsr_height_bgd),
+    FUNC("G3D_RENDER_WIDTH", "", TYPE_INT, g3d_render_width_bgd),
+    FUNC("G3D_RENDER_HEIGHT", "", TYPE_INT, g3d_render_height_bgd),
+    FUNC("G3D_IBL_REFRESH", "", TYPE_INT, g3d_ibl_refresh_bgd),
     FUNC("G3D_SET_EXPOSURE", "F", TYPE_INT, g3d_set_exposure_bgd),
     FUNC("G3D_SET_BLOOM", "IFF", TYPE_INT, g3d_set_bloom_bgd),
     FUNC("G3D_SET_TONEMAP", "I", TYPE_INT, g3d_set_tonemap_bgd),

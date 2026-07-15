@@ -27,6 +27,11 @@ typedef struct {
        64-bit pointer in the 32-bit model_id field */
     void *mesh;
 
+    /* Node animation: when this entity's mesh is a node-animated submesh
+       (mesh->anim_node >= 0), anim_model points back to its G3DModel so the
+       renderer can fetch node_global[anim_node] each frame. NULL for static. */
+    void *anim_model;
+
     /* Transform */
     Vec3 position;
     Quat rotation;
@@ -38,6 +43,13 @@ typedef struct {
 
     /* Collision: 1 = solid box collider (uses the mesh world AABB) */
     int collider;
+
+    /* Occlusion culling (libmod_3d_occlusion.c). occ_visible is one frame old:
+       the query issued after the opaque pass is read back without blocking.
+       Defaults to visible, so an untested entity is always drawn. */
+    unsigned int occ_query;    /* GL query object, 0 = not created yet */
+    int occ_pending;           /* a query is in flight */
+    int occ_visible;           /* 0 = fully behind other geometry */
 
     /* Model far-LOD: on a g3d_model_spawn root, a single merged+decimated mesh
        drawn (with lod_material) when the model is beyond g3d_set_lod distance,

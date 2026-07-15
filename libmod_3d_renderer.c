@@ -20,6 +20,10 @@
 #include "libmod_3d_particles.h"
 #include "libmod_3d_fire.h"
 #include "libmod_3d_sky.h"
+#include "libmod_3d_ibl.h"
+#include "libmod_3d_occlusion.h"
+#include "libmod_3d_smaa.h"
+#include "libmod_3d_fsr.h"
 #include "libmod_3d_cloud_glsl.h"
 #include "libmod_3d_mirror.h"
 #include "libmod_3d_instance.h"
@@ -63,6 +67,9 @@ int g3d_renderer_init(uint32_t width, uint32_t height) {
 
     g_renderer.display_width = width;
     g_renderer.display_height = height;
+    g_renderer.render_scale = 1.0f;
+    g_renderer.render_width = width;
+    g_renderer.render_height = height;
 
     /* Load shaders */
     g_renderer.phong_shader =
@@ -265,11 +272,38 @@ void g3d_renderer_set_flip(int flip) {
     g_renderer.flip_y = flip ? 1 : 0;
 }
 
+/* Recompute the internal render size from the display size and the scale. */
+static void update_render_size(void) {
+    float s = g_renderer.render_scale;
+    if (s <= 0.0f || s > 1.0f) s = 1.0f;
+    uint32_t w = (uint32_t)((float)g_renderer.display_width * s + 0.5f);
+    uint32_t h = (uint32_t)((float)g_renderer.display_height * s + 0.5f);
+    g_renderer.render_width  = w > 0 ? w : 1;
+    g_renderer.render_height = h > 0 ? h : 1;
+}
+
 void g3d_renderer_set_viewport_size(uint32_t w, uint32_t h) {
     if (w > 0 && h > 0) {
         g_renderer.display_width = w;
         g_renderer.display_height = h;
+        update_render_size();
     }
+}
+
+/* Render the 3D scene at `scale` of the display and upscale on the way out.
+   1.0 = native. Only useful with an upscaler enabled (see libmod_3d_fsr.c),
+   otherwise the image is just stretched. */
+void g3d_renderer_set_render_scale(float scale) {
+    if (scale <= 0.0f || scale > 1.0f) scale = 1.0f;
+    g_renderer.render_scale = scale;
+    update_render_size();
+}
+
+float g3d_renderer_get_render_scale(void) { return g_renderer.render_scale; }
+
+void g3d_renderer_get_render_size(uint32_t *w, uint32_t *h) {
+    if (w) *w = g_renderer.render_width;
+    if (h) *h = g_renderer.render_height;
 }
 
 void g3d_renderer_get_display_size(uint32_t *width, uint32_t *height) {
@@ -402,10 +436,14 @@ void g3d_renderer_begin_frame(void) {
         return;
 
 #ifndef VITA
+    /* Refresh the IBL environment before binding our targets (it captures the
+       sky into its own FBO). No-op unless the sky changed. */
+    g3d_ibl_update();
+
     /* HDR on: the scene renders into the internal RGBA16F buffer; end resolves to the host
        FBO. HDR off: render straight into the host FBO (legacy path). */
     if (g_renderer.hdr_active) {
-        ensure_hdr_targets(g_renderer.display_width, g_renderer.display_height);
+        ensure_hdr_targets(g_renderer.render_width, g_renderer.render_height);
         g_renderer.framebuffer = g_renderer.hdr_ready ? g_renderer.hdr_fbo : g_renderer.target_fbo;
     } else {
         g_renderer.framebuffer = g_renderer.target_fbo;
@@ -415,7 +453,7 @@ void g3d_renderer_begin_frame(void) {
     if (g_renderer.framebuffer == g_renderer.target_fbo) {
         glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
     } else {
-        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+        glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     }
 
     /* SDL_gpu leaves GL state that breaks raw rendering: scissor test may be
@@ -615,7 +653,7 @@ uint32_t g3d_renderer_scene_texture(void) { return g_renderer.scene_texture; }
 
 uint32_t g3d_renderer_capture_scene(void) {
 #ifndef VITA
-    uint32_t w = g_renderer.display_width, h = g_renderer.display_height;
+    uint32_t w = g_renderer.render_width, h = g_renderer.render_height;
     if (w == 0 || h == 0) return 0;
     if (!g_renderer.scene_texture) {
         glGenTextures(1, &g_renderer.scene_texture);
@@ -643,7 +681,7 @@ uint32_t g3d_renderer_capture_scene(void) {
 
 uint32_t g3d_renderer_capture_depth(void) {
 #ifndef VITA
-    uint32_t w = g_renderer.display_width, h = g_renderer.display_height;
+    uint32_t w = g_renderer.render_width, h = g_renderer.render_height;
     if (w == 0 || h == 0) return 0;
     if (!g_renderer.scene_depth_tex) {
         glGenTextures(1, &g_renderer.scene_depth_tex);
@@ -722,7 +760,7 @@ void g3d_renderer_underwater_pass(void) {
     /* Draw into the scene framebuffer (HDR fbo when HDR is on); a prior pass may
        have left another FBO bound, which would send the tint nowhere visible. */
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.framebuffer);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     g3d_renderer_capture_scene();   /* grab the current frame */
     G3DShaderProgram *sh = (G3DShaderProgram *)g_renderer.post_shader;
     g3d_shader_use(sh);
@@ -856,12 +894,37 @@ void g3d_renderer_resolve_hdr(void) {
         bloom_src = src;
     }
 
-    /* resolve: HDR + bloom -> host target */
-    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.target_fbo);
-    if (g_renderer.target_fbo == 0) {
-        glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
+    /* Tail of the frame: tonemap -> [SMAA] -> [FSR upscale] -> host target.
+       Everything before the upscale runs at the render resolution; only the
+       last step writes at display resolution.
+
+       rvp = where the final image lands. smaa/fsr chain their intermediates at
+       render res, so each stage writes to the next one's buffer and whoever is
+       last writes to the real target. */
+    int rw = (int)g_renderer.render_width, rh = (int)g_renderer.render_height;
+    int rvp_x = g_renderer.vp_x, rvp_y = g_renderer.vp_y;
+    int rvp_w = g_renderer.vp_w, rvp_h = g_renderer.vp_h;
+    if (g_renderer.target_fbo != 0) {
+        rvp_x = 0; rvp_y = 0;
+        rvp_w = g_renderer.display_width; rvp_h = g_renderer.display_height;
+    }
+    /* FSR must upscale to the size of the viewport it will actually write into,
+       not to the logical display size. RCAS is a 1:1 pass (texelFetch), so if
+       the upscaled image is bigger than the output viewport it only reads a
+       corner of it and the frame comes out cropped - which reads on screen as
+       the image being magnified. */
+    unsigned int fsr_fbo  = g3d_fsr_input_fbo(rw, rh, rvp_w, rvp_h);
+    unsigned int smaa_fbo = g3d_smaa_scene_fbo(rw, rh);
+    /* Where the tonemap writes: SMAA's input if it's on, else FSR's, else out. */
+    if (smaa_fbo) {
+        glBindFramebuffer(GL_FRAMEBUFFER, smaa_fbo);
+        glViewport(0, 0, rw, rh);
+    } else if (fsr_fbo) {
+        glBindFramebuffer(GL_FRAMEBUFFER, fsr_fbo);
+        glViewport(0, 0, rw, rh);
     } else {
-        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+        glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.target_fbo);
+        glViewport(rvp_x, rvp_y, rvp_w, rvp_h);
     }
     G3DShaderProgram *ts = (G3DShaderProgram *)g_renderer.tonemap_shader;
     g3d_shader_use(ts);
@@ -877,6 +940,16 @@ void g3d_renderer_resolve_hdr(void) {
     g3d_shader_set_float(ts, "uBloomAmt", g_renderer.bloom_enabled ? g_renderer.bloom_amount : 0.0f);
     g3d_shader_set_int(ts, "uTonemap", g_renderer.tonemap_mode);
     glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindVertexArray(0);
+
+    /* SMAA hands off to FSR when it's on (a spatial upscaler needs an
+       anti-aliased source), otherwise straight to the target. */
+    if (smaa_fbo) {
+        if (fsr_fbo) g3d_smaa_apply(fsr_fbo, 0, 0, rw, rh);
+        else         g3d_smaa_apply(g_renderer.target_fbo, rvp_x, rvp_y, rvp_w, rvp_h);
+    }
+    if (fsr_fbo)
+        g3d_fsr_apply(g_renderer.target_fbo, rvp_x, rvp_y, rvp_w, rvp_h);
 
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(0);
@@ -925,7 +998,7 @@ static const char *ssao_blur_frag =
 void g3d_renderer_ssao_pass(void) {
     if (!g_renderer.hdr_active || !g_renderer.ssao_enabled || !g_renderer.hdr_ready) return;
     if (!g_renderer.active_camera) return;
-    uint32_t sw = g_renderer.display_width, sh = g_renderer.display_height;   /* full res = sharp AO */
+    uint32_t sw = g_renderer.render_width, sh = g_renderer.render_height;   /* render res = sharp AO */
     if (sw == 0 || sh == 0) return;
 
     static float kernel[SSAO_KERNEL * 3]; static int kernel_built = 0;
@@ -1014,7 +1087,7 @@ void g3d_renderer_ssao_pass(void) {
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(0);
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.framebuffer);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     glEnable(GL_DEPTH_TEST);
 }
 
@@ -1080,7 +1153,7 @@ void g3d_renderer_cloud_pass(void) {
     if (!sh || !csh) return;
 
     /* Half-res target (1/4 the pixels for the expensive raymarch). */
-    uint32_t hw = g_renderer.display_width / 2, hh = g_renderer.display_height / 2;
+    uint32_t hw = g_renderer.render_width / 2, hh = g_renderer.render_height / 2;
     if (hw < 1) hw = 1; if (hh < 1) hh = 1;
     if (!g_renderer.cloud_fbo || g_renderer.cloud_w != hw || g_renderer.cloud_h != hh) {
         if (!g_renderer.cloud_fbo) glGenFramebuffers(1, &g_renderer.cloud_fbo);
@@ -1125,9 +1198,10 @@ void g3d_renderer_cloud_pass(void) {
     g3d_shader_set_float(sh, "uCloudThick", thick);
     glDrawArrays(GL_TRIANGLES, 0, 3);
 
-    /* Pass 2: composite (bilinear upscale) into HDR with the cloud blend. */
+    /* Pass 2: composite (bilinear upscale) into HDR with the cloud blend.
+       HDR is at render size, so the viewport must be too. */
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.hdr_fbo);
-    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     glEnable(GL_BLEND); glBlendFunc(GL_ONE, GL_SRC_ALPHA);   /* dst*T + scat */
     g3d_shader_use(csh);
     glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, g_renderer.cloud_tex); g3d_shader_set_int(csh, "uClouds", 0);
@@ -1305,16 +1379,40 @@ static void draw_scene_entities(G3DCamera *camera, int *entities, int entity_cou
             }
         }
 
+        /* Hidden behind other geometry last frame (see libmod_3d_occlusion.c). */
+        if (!g3d_occlusion_visible(entity)) {
+            g_renderer.entities_culled++;
+            continue;
+        }
+
         /* Get material (if any) */
         G3DMaterial *material = NULL;
         if (entity->material_id >= 0) {
             material = g3d_material_impl_get(entity->material_id);
         }
 
+        /* Node-animated submesh: its vertices are in the glTF node's LOCAL space,
+           so fold the node's animated world transform (+ the model's recenter
+           offset) into the model matrix. Keep the full mesh (no LOD swap) so the
+           moving part stays crisp. */
+        G3DMesh *emesh = (G3DMesh *)entity->mesh;
+        Mat4 draw_matrix = world_matrix;
+        int node_animated = 0;
+        if (emesh && emesh->anim_node >= 0 && entity->anim_model) {
+            G3DModel *am = (G3DModel *)entity->anim_model;
+            if (am->node_global && emesh->anim_node < am->node_count) {
+                Mat4 offm = mat4_translate(am->skin_offset[0], am->skin_offset[1],
+                                           am->skin_offset[2]);
+                Mat4 nodem = mat4_multiply(offm, am->node_global[emesh->anim_node]);
+                draw_matrix = mat4_multiply(world_matrix, nodem);
+                node_animated = 1;
+            }
+        }
+
         /* Automatic LOD: far entities render their auto-generated low-poly mesh.
            Same global g3d_set_lod distance as instanced objects; no game code. */
         void *drawmesh = entity->mesh;
-        if (lodd > 0.0f && !entity->lod_exempt) {
+        if (!node_animated && lodd > 0.0f && !entity->lod_exempt) {
             float ex = world_matrix.m[12] - camera->position.x;
             float ey = world_matrix.m[13] - camera->position.y;
             float ez = world_matrix.m[14] - camera->position.z;
@@ -1324,7 +1422,7 @@ static void draw_scene_entities(G3DCamera *camera, int *entities, int entity_cou
 
         /* Render the entity's mesh (render_mesh recomputes the normal matrix
            from the model matrix internally) */
-        g3d_renderer_render_mesh(drawmesh, material, world_matrix,
+        g3d_renderer_render_mesh(drawmesh, material, draw_matrix,
                                  mat4_identity());
     }
 }
@@ -1335,7 +1433,11 @@ static void g3d_renderer_bind_scene_target(void) {
     if (g_renderer.framebuffer == g_renderer.target_fbo)
         glViewport(g_renderer.vp_x, g_renderer.vp_y, g_renderer.vp_w, g_renderer.vp_h);
     else
-        glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+        /* The internal buffer is at RENDER size, not display size. Using the
+           display size here draws the scene as if the screen were bigger and
+           only the corner that fits gets kept - the frame comes out cropped and
+           looks zoomed in, off-centre. */
+        glViewport(0, 0, g_renderer.render_width, g_renderer.render_height);
     glEnable(GL_DEPTH_TEST);
     glDepthFunc(GL_LEQUAL);
 #endif
@@ -1416,14 +1518,21 @@ void g3d_renderer_render(void) {
         g3d_renderer_reflection_pass_plane(0.0f, g3d_water_get_level(), 0.0f,
                                            0.0f, 1.0f, 0.0f,
                                            g_renderer.refl_framebuffer,
-                                           g_renderer.display_width,
-                                           g_renderer.display_height);
+                                           g_renderer.render_width,
+                                           g_renderer.render_height);
     }
     /* Visible/near mirrors render the scene mirrored into their textures */
     g3d_mirror_render_reflections(g_renderer.active_camera);
     g3d_renderer_forward_pass();
     /* Instanced vegetation/props (opaque, one draw call per group) */
     g3d_instances_render_all(g_renderer.active_camera, g_renderer.flip_y);
+    /* Depth now holds the opaque occluders: test every entity's box against it
+       so the next frame can skip whatever is fully hidden. */
+    {
+        int occ_n = 0;
+        int *occ_e = g3d_scene_impl_get_entities(&occ_n);
+        g3d_occlusion_pass(g_renderer.active_camera, occ_e, occ_n, g_renderer.flip_y);
+    }
     /* Sky fills the background after opaque geometry (depth LEQUAL, far plane) */
     g3d_sky_render_pass(g_renderer.active_camera, g_renderer.flip_y);
     /* Mirror surfaces (opaque) sample their reflection textures */
@@ -1600,6 +1709,21 @@ void g3d_renderer_render_mesh(void *mesh, void *material, Mat4 model_matrix,
                                   g_renderer.ambient_color[1],
                                   g_renderer.ambient_color[2]));
     g3d_shader_set_float(shader, "uAmbientIntensity", g_renderer.ambient_intensity);
+
+    /* Image based lighting from the sky: irradiance (diffuse) + prefiltered
+       chain and BRDF LUT (specular). Units 15..17 — 0..14 are taken by albedo,
+       shadow, wall, spot shadows, normal/metal/rough and the biome maps. */
+    if (g3d_ibl_bind(15, 16, 17)) {
+        g3d_shader_set_int(shader, "uHasIBL", 1);
+        g3d_shader_set_int(shader, "uIrradiance", 15);
+        g3d_shader_set_int(shader, "uPrefilter", 16);
+        g3d_shader_set_sampler2d(shader, "uBRDFLUT", 17);
+        g3d_shader_set_float(shader, "uIBLIntensity", g3d_ibl_intensity());
+        g3d_shader_set_float(shader, "uPrefilterMips", g3d_ibl_prefilter_mips());
+        glActiveTexture(GL_TEXTURE0);
+    } else {
+        g3d_shader_set_int(shader, "uHasIBL", 0);
+    }
 
     /* Bind albedo texture (real or 1x1 white fallback) to unit 0 */
     glActiveTexture(GL_TEXTURE0);
