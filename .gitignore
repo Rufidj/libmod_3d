@@ -8,6 +8,9 @@ build/
 # Compiled BennuGD bytecode (regenerable from the .PRG sources)
 *.dcb
 
+# Benchmark output written by TEST_FLYBENCH (results, not source)
+TEST/bench_result*.txt
+
 # Binary assets (models/textures) are kept out of the source repo
 assets/
 TEST/assets/
