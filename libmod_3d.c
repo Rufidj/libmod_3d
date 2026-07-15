@@ -899,21 +899,55 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
     if (root < 0) return -1;
     g3d_entity_impl_set_rotation(root, 0.0f, roty, 0.0f);
 
+    /* Submeshes that share the same maps share ONE material. Spatial chunking
+       splits a submesh into many chunks that all keep the source's textures, so
+       a material each would burn through the pool (a 158-unit map chunked at 1
+       unit made 9073 submeshes and hit "Max materials reached" 4984 times -
+       every one of those rendered untextured). Reusing also cuts state changes. */
+    void **key_alb = (void **)calloc(model->mesh_count, sizeof(void *));
+    void **key_nrm = (void **)calloc(model->mesh_count, sizeof(void *));
+    void **key_met = (void **)calloc(model->mesh_count, sizeof(void *));
+    void **key_rgh = (void **)calloc(model->mesh_count, sizeof(void *));
+    int *key_mat = (int *)calloc(model->mesh_count, sizeof(int));
+    int key_count = 0;
+
     for (uint32_t j = 0; j < model->mesh_count; j++) {
-        int mat = g3d_material_impl_create();
-        G3DMaterial *m = g3d_material_impl_get(mat);
-        if (m) {
-            void *alb = model->mesh_textures ? model->mesh_textures[j] : NULL;
-            m->albedo_texture = alb;
-            m->albedo_texture_id = alb ? 0 : -1;
-            /* Static map/prop geometry is matte: a glossy default (0.5) puts a
-               grazing specular sheen on flat ground toward the horizon that reads
-               as a bright "seam". High roughness keeps it flat and even. */
-            m->roughness = 0.9f;
-            m->metallic  = 0.0f;
-            if (model->mesh_normal && model->mesh_normal[j])       g3d_material_impl_set_map(mat, 1, model->mesh_normal[j]);
-            if (model->mesh_metallic && model->mesh_metallic[j])   g3d_material_impl_set_map(mat, 2, model->mesh_metallic[j]);
-            if (model->mesh_roughness && model->mesh_roughness[j]) g3d_material_impl_set_map(mat, 3, model->mesh_roughness[j]);
+        void *alb = model->mesh_textures ? model->mesh_textures[j] : NULL;
+        void *nrm = model->mesh_normal ? model->mesh_normal[j] : NULL;
+        void *met = model->mesh_metallic ? model->mesh_metallic[j] : NULL;
+        void *rgh = model->mesh_roughness ? model->mesh_roughness[j] : NULL;
+
+        int mat = -1;
+        if (key_mat) {
+            for (int k = 0; k < key_count; k++) {
+                if (key_alb[k] == alb && key_nrm[k] == nrm &&
+                    key_met[k] == met && key_rgh[k] == rgh) {
+                    mat = key_mat[k];
+                    break;
+                }
+            }
+        }
+        if (mat < 0) {
+            mat = g3d_material_impl_create();
+            G3DMaterial *m = g3d_material_impl_get(mat);
+            if (m) {
+                m->albedo_texture = alb;
+                m->albedo_texture_id = alb ? 0 : -1;
+                /* Static map/prop geometry is matte: a glossy default (0.5) puts a
+                   grazing specular sheen on flat ground toward the horizon that reads
+                   as a bright "seam". High roughness keeps it flat and even. */
+                m->roughness = 0.9f;
+                m->metallic  = 0.0f;
+                if (nrm) g3d_material_impl_set_map(mat, 1, nrm);
+                if (met) g3d_material_impl_set_map(mat, 2, met);
+                if (rgh) g3d_material_impl_set_map(mat, 3, rgh);
+            }
+            if (key_mat && mat >= 0) {
+                key_alb[key_count] = alb; key_nrm[key_count] = nrm;
+                key_met[key_count] = met; key_rgh[key_count] = rgh;
+                key_mat[key_count] = mat;
+                key_count++;
+            }
         }
         int ent = g3d_entity_impl_spawn(scene_id, 0, 0.0f, 0.0f, 0.0f);
         if (ent < 0) continue;
@@ -928,6 +962,10 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
         g3d_entity_impl_set_scale(ent, s, s, s);
         g3d_entity_impl_set_parent(ent, root);               /* child of the root -> moves with it */
     }
+    if (model->mesh_count > (uint32_t)key_count)
+        printf("G3D: model spawn: %u submeshes sharing %d materials\n",
+               model->mesh_count, key_count);
+    free(key_alb); free(key_nrm); free(key_met); free(key_rgh); free(key_mat);
 
     /* Far-LOD: one merged, decimated mesh drawn (with the model albedo) instead
        of all the submesh children when the model is beyond g3d_set_lod distance. */

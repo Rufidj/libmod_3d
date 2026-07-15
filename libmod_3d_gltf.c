@@ -886,6 +886,16 @@ G3DModel *g3d_gltf_load(const char *filepath) {
         float dx = mx[0] - mn[0], dz = mx[2] - mn[2];
         float diag = sqrtf(dx*dx + dz*dz);
         float cell = g_gltf_chunk_cell;
+        /* Clamp: a cell far smaller than the map shatters it into thousands of
+           submeshes. Each one spawns an entity, and the pools are finite - at 1
+           unit on this 158-unit map that meant 9073 submeshes and the material
+           pool running dry, leaving thousands of chunks rendering untextured.
+           A 32x32 grid over the model is already far finer than culling needs. */
+        if (cell > 0.0f && diag > 0.0f && cell < diag / 32.0f) {
+            printf("G3D: chunk cell %.2f too small for a %.1f model: clamped to %.2f\n",
+                   cell, diag, diag / 32.0f);
+            cell = diag / 32.0f;
+        }
         if (cell < 0.0f) {
             /* Auto: only map-scale models. A prop or a character must NOT be
                shredded into extra draw calls - splitting only pays off when the
