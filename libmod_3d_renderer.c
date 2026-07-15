@@ -908,8 +908,12 @@ void g3d_renderer_resolve_hdr(void) {
         rvp_x = 0; rvp_y = 0;
         rvp_w = g_renderer.display_width; rvp_h = g_renderer.display_height;
     }
-    unsigned int fsr_fbo  = g3d_fsr_input_fbo(rw, rh, (int)g_renderer.display_width,
-                                              (int)g_renderer.display_height);
+    /* FSR must upscale to the size of the viewport it will actually write into,
+       not to the logical display size. RCAS is a 1:1 pass (texelFetch), so if
+       the upscaled image is bigger than the output viewport it only reads a
+       corner of it and the frame comes out cropped - which reads on screen as
+       the image being magnified. */
+    unsigned int fsr_fbo  = g3d_fsr_input_fbo(rw, rh, rvp_w, rvp_h);
     unsigned int smaa_fbo = g3d_smaa_scene_fbo(rw, rh);
     /* Where the tonemap writes: SMAA's input if it's on, else FSR's, else out. */
     if (smaa_fbo) {
