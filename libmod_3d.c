@@ -1210,6 +1210,18 @@ int64_t g3d_set_fsr_height_bgd(INSTANCE *my, int64_t *params) {
     g3d_renderer_set_render_scale(scale);
     return 1;
 }
+/* Actual internal render size, so a demo can show what is really happening
+   instead of what it asked for. */
+int64_t g3d_render_width_bgd(INSTANCE *my, int64_t *params) {
+    uint32_t w = 0, h = 0;
+    g3d_renderer_get_render_size(&w, &h);
+    return (int64_t)w;
+}
+int64_t g3d_render_height_bgd(INSTANCE *my, int64_t *params) {
+    uint32_t w = 0, h = 0;
+    g3d_renderer_get_render_size(&w, &h);
+    return (int64_t)h;
+}
 /* Force a re-capture (day/night cycles, a sun that moves at runtime). */
 int64_t g3d_ibl_refresh_bgd(INSTANCE *my, int64_t *params) {
     g3d_ibl_invalidate();
