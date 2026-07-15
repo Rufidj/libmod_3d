@@ -422,14 +422,20 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
  */
 
 /* Chunk cell size: -1 = auto (map-scale models only), 0 = off, >0 = explicit.
-   OFF by default: measured on Bistro at street level, chunking COSTS frames
-   (522 -> 385 FPS without occlusion culling, 684 -> 563 with it). It does make
-   culling reject much more (298 vs 73 entities, -1M triangles), but this
-   renderer pays ~5.9us of CPU per draw call - render_mesh re-sends ~99
-   uniforms/texture binds every draw - so the +117 draws cost more than the
-   triangles saved. Chunking becomes a win once per-draw cost is cut (frame
-   constants into a UBO); until then it is opt-in via g3d_gltf_set_chunking. */
-static float g_gltf_chunk_cell = 0.0f;
+   Auto by default. Measured with TEST_FLYBENCH over a full pass through Bistro,
+   in a real window (average FPS of the whole route):
+
+     chunking  occlusion   FPS
+     off       off         731.7
+     off       ON          736.2   (+0.6%  - occlusion has nothing to reject)
+     auto      off         710.1   (-3%    - the extra draws, no payoff alone)
+     auto      ON          794.7   (+11.9% over its own baseline, +8.6% overall)
+
+   Chunking barely pays on its own, but it is what lets occlusion culling work
+   at all: unchunked, a submesh's AABB spans the map, so something in it is
+   always visible and the test can never reject it (+0.6%). Chunked, the same
+   test is worth +11.9%. The pair is the win, neither half alone. */
+static float g_gltf_chunk_cell = -1.0f;
 void g3d_gltf_set_chunking(float cell) { g_gltf_chunk_cell = cell; }
 
 /* Build a mesh that TAKES OWNERSHIP of the buffers: no extra copy, and no
