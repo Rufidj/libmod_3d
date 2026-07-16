@@ -281,9 +281,32 @@ static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
     n = tr_u32(r); tr_skip(r, (size_t)n * 18);     /* models */
     n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* static meshes */
 
-    unsigned int nobjtex = tr_u32(r);
+    /* The block walk lands ON the object textures for TR1/TR2, but TR3 slips an
+       extra ~41KB block in here that isn't worth tracking across five games'
+       worth of format drift. Instead, find the object texture array by CONTENT:
+       scan forward for a count whose entries all reference valid textiles. This
+       is self-correcting - a wrong offset reads garbage tiles and gets rejected.
+       Object textures are 20 bytes: attribute(u16) tile(u16) + 4*(u16 u16). */
+    unsigned int nobjtex = 0;
+    size_t obj_at = 0;
+    for (size_t scan = r->at; scan + 4 + 20 * 32 <= r->size; scan += 2) {
+        unsigned int cnt = (unsigned int)r->d[scan] | ((unsigned int)r->d[scan+1] << 8) |
+                           ((unsigned int)r->d[scan+2] << 16) | ((unsigned int)r->d[scan+3] << 24);
+        if (cnt < 16 || cnt > 20000) continue;
+        if (scan + 4 + (size_t)cnt * 20 > r->size) continue;
+        int good = 1, checks = cnt < 32 ? (int)cnt : 32;
+        for (int i = 0; i < checks; i++) {
+            const unsigned char *e = r->d + scan + 4 + (size_t)i * 20;
+            unsigned short attr = (unsigned short)(e[0] | (e[1] << 8));
+            unsigned short tile = (unsigned short)(e[2] | (e[3] << 8)) & 0x7FFF;
+            if (tile >= ntiles || attr > 15) { good = 0; break; }
+        }
+        if (good) { nobjtex = cnt; obj_at = scan + 4; break; }
+    }
+
     TRObjTex *otex = NULL;
-    if (!r->overrun && nobjtex > 0 && nobjtex < 65536) {
+    if (nobjtex > 0) {
+        r->at = obj_at;
         otex = (TRObjTex *)calloc(nobjtex, sizeof(TRObjTex));
         for (unsigned int i = 0; i < nobjtex; i++) {
             tr_skip(r, 2);                          /* attribute (blend mode) */
