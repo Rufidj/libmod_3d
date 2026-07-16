@@ -19,6 +19,7 @@
 
 #include "libmod_3d_trlevel.h"
 #include "libmod_3d_texture.h"
+#include "ufbx.h"          /* reuse ufbx's zlib inflate for TR4/5 (no -lz dep) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,40 +157,23 @@ static G3DTexture *tr1_build_atlas(const unsigned char *tiles, int ntiles,
     return tex;
 }
 
-static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
-    /* Per-version room layout differences, all verified against real levels:
-         room_vertex : TR1 = 8 bytes (x,y,z,light), TR2/3 = 12 (two lights + attrs)
-         after ambient intensity: TR1 +0, TR2 +2, TR3 +2 extra
-         room light  : TR1 = 18 bytes, TR2/3 = 24
-         room static : TR1 = 18 bytes, TR2/3 = 20
-         room tail   : TR3 has 3 extra bytes (waterScheme, reverbInfo, filler) */
+/* Parse the rooms (the reader must be positioned at numRooms) and build a
+   G3DModel. Shared by TR1-3 (reading the level file directly) and TR4 (reading
+   the decompressed level-data blob). The atlas is either built here from 8-bit
+   textiles + palette (TR1-3), or passed in already built from the 32-bit
+   textiles (TR4, prebuilt_atlas). obj_stride is the object-texture record size:
+   20 bytes in TR1-3, 38 in TR4. */
+static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
+                                const unsigned char *tiles, unsigned int ntiles,
+                                const unsigned char *pal,
+                                G3DTexture *prebuilt_atlas, int obj_stride) {
+    /* Per-version room layout differences, all verified against real levels. */
     int vert_sz   = (ver == G3D_TR1) ? 8  : 12;
-    int light_sz  = (ver == G3D_TR1) ? 18 : 24;
+    int light_sz  = (ver == G3D_TR1) ? 18 : ((ver == G3D_TR4) ? 46 : 24);
     int static_sz = (ver == G3D_TR1) ? 18 : 20;
-    /* Bytes between the ambient intensity and the light list: TR2 has 4 extra,
-       TR3 has 2 (measured by brute-force over real levels; getting these two
-       swapped desynchronises from the second room on). */
+    /* Bytes between the ambient intensity and the light list. */
     int after_amb = (ver == G3D_TR1) ? 0  : ((ver == G3D_TR2) ? 4 : 2);
-    int room_tail = (ver == G3D_TR3) ? 3  : 0;
-
-    /* Palette: TR1 keeps it at the END of the file, TR2/3 right after the
-       version (which we've already read). Grab TR2/3's now. */
-    const unsigned char *pal = NULL;
-    if (ver != G3D_TR1) {
-        pal = r->d + r->at;
-        tr_skip(r, 768);                 /* 8-bit palette */
-        tr_skip(r, 1024);                /* 16-bit palette (unused here) */
-    }
-
-    unsigned int ntiles = tr_u32(r);
-    if (r->overrun || ntiles == 0 || ntiles > 64) return NULL;
-    const unsigned char *tiles = r->d + r->at;
-    tr_skip(r, (size_t)ntiles * TEXTILE_W * TEXTILE_H);
-    /* TR2/3 also carry 16-bit textiles right after the 8-bit ones; we texture
-       from the 8-bit set + palette, so skip them. */
-    if (ver != G3D_TR1)
-        tr_skip(r, (size_t)ntiles * TEXTILE_W * TEXTILE_H * 2);
-    tr_skip(r, 4);                       /* unused */
+    int room_tail = (ver == G3D_TR3 || ver == G3D_TR4) ? 3 : 0;
 
     int nrooms = tr_u16(r);
     if (r->overrun || nrooms <= 0) return NULL;
@@ -262,70 +246,69 @@ static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
         int nl = tr_u16(r); tr_skip(r, (size_t)nl * light_sz);
         int nsm = tr_u16(r); tr_skip(r, (size_t)nsm * static_sz);
         tr_skip(r, 4);                   /* alternate room + flags */
-        tr_skip(r, (size_t)room_tail);   /* TR3: waterScheme, reverbInfo, filler */
+        tr_skip(r, (size_t)room_tail);   /* TR3/4: waterScheme, reverbInfo, filler */
         if (r->overrun) break;
     }
+    size_t rooms_end = r->at;
 
-    /* Walk to the object textures. Every count here was checked against a real
-       level; anim_dispatch in particular is 8 bytes, not 2. */
-    unsigned int n;
-    n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* floor data */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* mesh data */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh pointers */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* animations */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 6);      /* state changes */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 8);      /* anim dispatches */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* anim commands */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh trees */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* frames */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 18);     /* models */
-    n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* static meshes */
-
-    /* The block walk lands ON the object textures for TR1/TR2, but TR3 slips an
-       extra ~41KB block in here that isn't worth tracking across five games'
-       worth of format drift. Instead, find the object texture array by CONTENT:
-       scan forward for a count whose entries all reference valid textiles. This
-       is self-correcting - a wrong offset reads garbage tiles and gets rejected.
-       Object textures are 20 bytes: attribute(u16) tile(u16) + 4*(u16 u16). */
+    /* Find the object texture array by CONTENT rather than tracking every block
+       between here and it: the intermediate structures drift across TR1-5 (TR3
+       alone slips an undocumented ~41KB block in). Scan forward from the end of
+       the rooms for a count whose entries all reference valid textiles; a wrong
+       offset reads garbage tile ids and is rejected, so it's self-correcting.
+       obj_stride is the record size (20 in TR1-3, 38 in TR4). */
     unsigned int nobjtex = 0;
     size_t obj_at = 0;
-    for (size_t scan = r->at; scan + 4 + 20 * 32 <= r->size; scan += 2) {
+    for (size_t scan = rooms_end; scan + 4 + (size_t)obj_stride * 32 <= r->size; scan += 2) {
         unsigned int cnt = (unsigned int)r->d[scan] | ((unsigned int)r->d[scan+1] << 8) |
                            ((unsigned int)r->d[scan+2] << 16) | ((unsigned int)r->d[scan+3] << 24);
-        if (cnt < 16 || cnt > 20000) continue;
-        if (scan + 4 + (size_t)cnt * 20 > r->size) continue;
+        if (cnt < 16 || cnt > 40000) continue;
+        if (scan + 4 + (size_t)cnt * obj_stride > r->size) continue;
         int good = 1, checks = cnt < 32 ? (int)cnt : 32;
         for (int i = 0; i < checks; i++) {
-            const unsigned char *e = r->d + scan + 4 + (size_t)i * 20;
-            unsigned short attr = (unsigned short)(e[0] | (e[1] << 8));
+            const unsigned char *e = r->d + scan + 4 + (size_t)i * obj_stride;
             unsigned short tile = (unsigned short)(e[2] | (e[3] << 8)) & 0x7FFF;
-            if (tile >= ntiles || attr > 15) { good = 0; break; }
+            if (tile >= ntiles) { good = 0; break; }
         }
         if (good) { nobjtex = cnt; obj_at = scan + 4; break; }
     }
 
+    /* TR4 object textures put the UVs 4 bytes later (an extra u16 NewFlags after
+       attribute+tile) and each coord is a byte pair (whole, fraction). */
+    int uv_off = (ver == G3D_TR4) ? 6 : 4;
     TRObjTex *otex = NULL;
     if (nobjtex > 0) {
-        r->at = obj_at;
         otex = (TRObjTex *)calloc(nobjtex, sizeof(TRObjTex));
         for (unsigned int i = 0; i < nobjtex; i++) {
-            tr_skip(r, 2);                          /* attribute (blend mode) */
-            unsigned short tile = tr_u16(r);
+            const unsigned char *e = r->d + obj_at + (size_t)i * obj_stride;
+            unsigned short tile = (unsigned short)(e[2] | (e[3] << 8));
             otex[i].tile = tile & 0x7FFF;
             for (int c = 0; c < 4; c++) {
-                /* Each coord is a 16-bit fixed point: whole part in the high
-                   byte, and the low byte pushes the sample inside the texel. */
-                unsigned short xc = tr_u16(r);
-                unsigned short yc = tr_u16(r);
-                otex[i].u[c] = (float)(xc >> 8) / (float)TEXTILE_W;
-                otex[i].v[c] = (float)(yc >> 8) / (float)TEXTILE_H;
+                const unsigned char *uv = e + uv_off + c * 4;
+                /* whole part in the high byte, low byte nudges inside the texel */
+                otex[i].u[c] = (float)uv[1] / (float)TEXTILE_W;
+                otex[i].v[c] = (float)uv[3] / (float)TEXTILE_H;
             }
         }
     }
 
     /* TR1's palette is at the very END of the file, so keep walking to reach it.
-       TR2/3 already gave us the palette up top, so stop here. */
+       TR2/3 gave us the palette up top; TR4 uses 32-bit textiles (no palette). */
     if (ver == G3D_TR1) {
+        unsigned int n;
+        r->at = rooms_end;
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* floor data */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* mesh data */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh pointers */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* animations */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 6);      /* state changes */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 8);      /* anim dispatches */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* anim commands */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh trees */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* frames */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 18);     /* models */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* static meshes */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 20);     /* object textures */
         n = tr_u32(r); tr_skip(r, (size_t)n * 16);     /* sprite textures */
         n = tr_u32(r); tr_skip(r, (size_t)n * 8);      /* sprite sequences */
         n = tr_u32(r); tr_skip(r, (size_t)n * 16);     /* cameras */
@@ -339,8 +322,11 @@ static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
         if (!r->overrun && r->at + 768 <= r->size) pal = r->d + r->at;
     }
 
-    if (!pal || !otex) {
-        fprintf(stderr, "G3D: TR%d parse failed before the palette: %s\n", ver, filepath);
+    /* Need the object textures always; the palette only when we build the atlas
+       here (TR1-3). TR4 has no palette - it comes in with its 32-bit atlas. */
+    if (!otex || (!pal && !prebuilt_atlas)) {
+        fprintf(stderr, "G3D: TR%d parse failed (otex=%p pal=%p): %s\n",
+                ver, (void *)otex, (void *)pal, filepath);
         for (int i = 0; i < nrooms; i++) { free(rooms[i].verts); free(rooms[i].idx); free(face_tex[i]); }
         free(rooms); free(face_tex); free(face_n); free(otex);
         return NULL;
@@ -393,7 +379,10 @@ static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
     /* One submesh per room. */
     G3DMesh *meshes = (G3DMesh *)calloc((size_t)nrooms, sizeof(G3DMesh));
     void **texs = (void **)calloc((size_t)nrooms, sizeof(void *));
-    G3DTexture *atlas = tr1_build_atlas(tiles, atlas_tiles, pal);
+    /* TR1-3 build the atlas here from 8-bit textiles + palette; TR4 passes its
+       32-bit atlas in already built. */
+    G3DTexture *atlas = prebuilt_atlas ? prebuilt_atlas
+                                       : tr1_build_atlas(tiles, atlas_tiles, pal);
     int sub = 0;
     for (int i = 0; i < nrooms; i++) {
         TRRoom *rm = &rooms[i];
@@ -432,6 +421,106 @@ static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
     return model;
 }
 
+/* ---- TR1-3: read the header, then hand the rooms to the shared builder ---- */
+
+static G3DModel *tr123_load(TRReader *r, const char *filepath, int ver) {
+    const unsigned char *pal = NULL;
+    if (ver != G3D_TR1) {
+        pal = r->d + r->at;              /* TR2/3: palette right after the version */
+        tr_skip(r, 768);
+        tr_skip(r, 1024);                /* 16-bit palette (unused) */
+    }
+    unsigned int ntiles = tr_u32(r);
+    if (r->overrun || ntiles == 0 || ntiles > 64) return NULL;
+    const unsigned char *tiles = r->d + r->at;
+    tr_skip(r, (size_t)ntiles * TEXTILE_W * TEXTILE_H);
+    if (ver != G3D_TR1)
+        tr_skip(r, (size_t)ntiles * TEXTILE_W * TEXTILE_H * 2);   /* 16-bit set */
+    tr_skip(r, 4);                       /* unused */
+    /* reader now at numRooms */
+    return tr_build_rooms(r, filepath, ver, tiles, ntiles, pal, NULL, 20);
+}
+
+/* ---- TR4: zlib-compressed textiles + a compressed level-data blob --------- */
+
+/* Inflate a zlib stream with ufbx's decompressor (avoids a libz dependency on
+   every platform). Returns a malloc'd buffer of exactly out_size, or NULL. */
+static unsigned char *tr_inflate(const unsigned char *src, size_t src_size,
+                                 size_t out_size) {
+    unsigned char *out = (unsigned char *)malloc(out_size ? out_size : 1);
+    if (!out) return NULL;
+    ufbx_inflate_input in;
+    memset(&in, 0, sizeof(in));
+    in.total_size = src_size;
+    in.data = src;
+    in.data_size = src_size;
+    ufbx_inflate_retain retain;
+    retain.initialized = false;
+    ptrdiff_t got = ufbx_inflate(out, out_size, &in, &retain);
+    if (got < 0 || (size_t)got != out_size) { free(out); return NULL; }
+    return out;
+}
+
+/* Build the 32-bit atlas from TR4's Textile32 (BGRA tiles). */
+static G3DTexture *tr4_build_atlas(const unsigned char *t32, int ntiles) {
+    if (ntiles <= 0) return NULL;
+    int w = TEXTILE_W, h = TEXTILE_H * ntiles;
+    unsigned char *rgba = (unsigned char *)malloc((size_t)w * h * 4);
+    if (!rgba) return NULL;
+    size_t px = (size_t)w * h;
+    for (size_t i = 0; i < px; i++) {
+        /* Textile32 is BGRA; swap to RGBA. */
+        rgba[i*4+0] = t32[i*4+2];
+        rgba[i*4+1] = t32[i*4+1];
+        rgba[i*4+2] = t32[i*4+0];
+        rgba[i*4+3] = t32[i*4+3];
+    }
+    G3DTexture *tex = (G3DTexture *)calloc(1, sizeof(G3DTexture));
+    if (!tex) { free(rgba); return NULL; }
+    tex->width = w; tex->height = h; tex->channels = 4;
+    tex->data = rgba; tex->data_size = (size_t)w * h * 4;
+    g3d_texture_upload_gpu(tex);
+    return tex;
+}
+
+static G3DModel *tr4_load(TRReader *r, const char *filepath) {
+    /* Header: numRoomTextiles, numObjTextiles, numBumpTextiles (u16 x3). */
+    unsigned int nroom = tr_u16(r), nobj = tr_u16(r), nbump = tr_u16(r);
+    unsigned int ntiles = nroom + nobj + nbump;
+    if (r->overrun || ntiles == 0 || ntiles > 4096) return NULL;
+
+    /* Textile32: uncompressed size, compressed size, then the zlib blob. */
+    unsigned int t32_unc = tr_u32(r), t32_comp = tr_u32(r);
+    const unsigned char *t32_src = r->d + r->at;
+    tr_skip(r, t32_comp);
+    /* Textile16 and the font/sky misc block: skip (we texture from the 32-bit). */
+    unsigned int u, c;
+    u = tr_u32(r); c = tr_u32(r); tr_skip(r, c);      /* Textile16 */
+    u = tr_u32(r); c = tr_u32(r); tr_skip(r, c);      /* Misc (font+sky) */
+    /* Level data: the whole level (rooms, meshes, ...) as one zlib blob. */
+    unsigned int lvl_unc = tr_u32(r), lvl_comp = tr_u32(r);
+    const unsigned char *lvl_src = r->d + r->at;
+    (void)u;
+    if (r->overrun) return NULL;
+
+    unsigned char *t32 = tr_inflate(t32_src, t32_comp, t32_unc);
+    unsigned char *lvl = tr_inflate(lvl_src, lvl_comp, lvl_unc);
+    if (!t32 || !lvl) {
+        fprintf(stderr, "G3D: TR4 zlib inflate failed: %s\n", filepath);
+        free(t32); free(lvl); return NULL;
+    }
+
+    G3DTexture *atlas = tr4_build_atlas(t32, (int)ntiles);
+    free(t32);
+
+    /* Parse the rooms out of the decompressed level data. It starts with an
+       unused u32, then numRooms. */
+    TRReader lr = { lvl, lvl_unc, 4 /* skip unused */, 0 };
+    G3DModel *model = tr_build_rooms(&lr, filepath, G3D_TR4, NULL, ntiles, NULL, atlas, 38);
+    free(lvl);
+    return model;
+}
+
 /* ---- entry point --------------------------------------------------------- */
 
 G3DModel *g3d_tr_load(const char *filepath) {
@@ -458,10 +547,12 @@ G3DModel *g3d_tr_load(const char *filepath) {
     G3DModel *model = NULL;
     if (ver == G3D_TR1 || ver == G3D_TR2 || ver == G3D_TR3) {
         model = tr123_load(&r, filepath, ver);
+    } else if (ver == G3D_TR4) {
+        model = tr4_load(&r, filepath);
     } else if (ver == G3D_TR_UNKNOWN) {
         fprintf(stderr, "G3D: not a Tomb Raider level (magic 0x%08X): %s\n", magic, filepath);
     } else {
-        fprintf(stderr, "G3D: TR%d levels aren't supported yet (TR1/2/3 only): %s\n", ver, filepath);
+        fprintf(stderr, "G3D: TR%d levels aren't supported yet (TR1-4 only): %s\n", ver, filepath);
     }
     free(data);
     return model;
