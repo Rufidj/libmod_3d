@@ -576,6 +576,11 @@ int64_t g3d_gltf_set_recenter_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_fbx_set_recenter_bgd(INSTANCE *my, int64_t *params) {
+    g3d_fbx_set_recenter((int)params[0]);
+    return 1;
+}
+
 /* Spatial chunking of map-scale models (-1 auto, 0 off, >0 cell size). */
 int64_t g3d_gltf_set_chunking_bgd(INSTANCE *my, int64_t *params) {
     g3d_gltf_set_chunking(*(float *)&params[0]);
@@ -823,6 +828,14 @@ int64_t g3d_model_submesh_texture_bgd(INSTANCE *my, int64_t *params) {
         !model->mesh_textures[i])
         return -1;
     return (int64_t)(intptr_t)model->mesh_textures[i];
+}
+
+/* 1 if submesh i is a TR water room (set by the Tomb Raider loader), else 0. */
+int64_t g3d_model_submesh_is_water_bgd(INSTANCE *my, int64_t *params) {
+    G3DModel *model = (G3DModel *)(intptr_t)params[0];
+    int i = (int)params[1];
+    if (!model || i < 0 || i >= (int)model->mesh_count || !model->submesh_water) return 0;
+    return (int64_t)model->submesh_water[i];
 }
 
 /* Per-submesh AABB in model space (centre + half-extents), for fracture chunks:
@@ -1295,6 +1308,29 @@ int64_t g3d_water_create_bgd(INSTANCE *my, int64_t *params) {
     float size = *(float *)&params[1];
     int subdiv = (int)params[2];
     return g3d_water_create(level, size, subdiv);
+}
+
+/* Positioned water pool (a "fluid zone"): a localized animated surface at (cx,cz),
+   size_x*size_z wide, its surface at `level`, `depth` deep. For TR water rooms.
+   Several can coexist (unlike the single global g3d_water_create). */
+int64_t g3d_fluid_add_bgd(INSTANCE *my, int64_t *params) {
+    return (int64_t)g3d_fluid_add(*(float *)&params[0], *(float *)&params[1],
+                                  *(float *)&params[2], *(float *)&params[3],
+                                  *(float *)&params[4], *(float *)&params[5]);
+}
+int64_t g3d_fluid_clear_bgd(INSTANCE *my, int64_t *params) {
+    g3d_fluid_clear();
+    return 1;
+}
+
+/* Estilo de TODAS las zonas de fluido: olas (amp,len,speed), color profundo (rgb)
+   y de orilla (rgb), y opacidad (0=transparente..1=opaco). Sin textura. */
+int64_t g3d_fluid_style_bgd(INSTANCE *my, int64_t *params) {
+    g3d_fluid_set_style(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                        *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
+                        *(float *)&params[6], *(float *)&params[7], *(float *)&params[8],
+                        0, *(float *)&params[9]);
+    return 1;
 }
 
 int64_t g3d_water_set_waves_bgd(INSTANCE *my, int64_t *params) {
@@ -1970,6 +2006,9 @@ int64_t g3d_char_move_bgd(INSTANCE *my, int64_t *params) {
 }
 int64_t g3d_char_jump_bgd(INSTANCE *my, int64_t *params) {
     g3d_char_jump((int)params[0], *(float *)&params[1]); return 1;
+}
+int64_t g3d_char_set_water_bgd(INSTANCE *my, int64_t *params) {
+    g3d_char_set_water((int)params[0], (int)params[1], *(float *)&params[2]); return 1;
 }
 int64_t g3d_char_update_bgd(INSTANCE *my, int64_t *params) {
     g3d_char_update((int)params[0], *(float *)&params[1]); return 1;

@@ -104,6 +104,7 @@ typedef struct {
     uint32_t nverts;
     uint32_t *idx;
     uint32_t nidx, idxcap;
+    int water;                /* 1 if the room flags mark it as a water room */
 } TRRoom;
 
 /* An object texture: which textile, and the UVs of its corners. */
@@ -120,6 +121,25 @@ static void room_push(TRRoom *rm, uint32_t a, uint32_t b, uint32_t c) {
     rm->idx[rm->nidx++] = a;
     rm->idx[rm->nidx++] = b;
     rm->idx[rm->nidx++] = c;
+}
+
+/* Does `cnt` records of `stride` bytes at `at` look like a real object-texture
+   table? Every record must name an existing textile AND the block must not be a
+   run of zeros: tile==0 passes "tile < ntiles", so a zero-filled region used to
+   be accepted as the table, giving UVs of (0,0) -> the whole level sampled the
+   atlas' top-left texel and rendered as one flat colour. */
+static int tr_objtex_valid(const unsigned char *d, size_t size, size_t at,
+                           unsigned int cnt, int stride, unsigned int ntiles) {
+    if (cnt < 1 || cnt > 40000) return 0;
+    if (at + (size_t)cnt * (size_t)stride > size) return 0;
+    int checks = cnt < 32 ? (int)cnt : 32, nonzero = 0;
+    for (int i = 0; i < checks; i++) {
+        const unsigned char *e = d + at + (size_t)i * (size_t)stride;
+        unsigned short tile = (unsigned short)(e[2] | (e[3] << 8)) & 0x7FFF;
+        if (tile >= ntiles) return 0;
+        for (int k = 4; k < stride; k++) if (e[k]) { nonzero = 1; break; }
+    }
+    return nonzero;
 }
 
 /* Build one RGBA texture from all the 8-bit textiles stacked vertically, so a
@@ -245,7 +265,9 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         tr_skip(r, (size_t)after_amb);   /* TR2/3: extra ambient/light-mode */
         int nl = tr_u16(r); tr_skip(r, (size_t)nl * light_sz);
         int nsm = tr_u16(r); tr_skip(r, (size_t)nsm * static_sz);
-        tr_skip(r, 4);                   /* alternate room + flags */
+        tr_skip(r, 2);                   /* alternate room (i16) */
+        unsigned short rflags = tr_u16(r);
+        rm->water = (rflags & 0x0001) ? 1 : 0;   /* bit 0 = water room */
         tr_skip(r, (size_t)room_tail);   /* TR3/4: waterScheme, reverbInfo, filler */
         if (r->overrun) break;
     }
@@ -293,21 +315,39 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         obj_at = r->at;
         if (r->overrun || nobjtex == 0 || nobjtex > 40000) nobjtex = 0;
     } else {
-        /* TR1-3: find the object textures by CONTENT (see TR3 note above): scan
-           forward from the end of the rooms for a count whose entries all
-           reference valid textiles. Self-correcting past undocumented blocks. */
-        for (size_t scan = rooms_end; scan + 4 + (size_t)obj_stride * 32 <= r->size; scan += 2) {
-            unsigned int cnt = (unsigned int)r->d[scan] | ((unsigned int)r->d[scan+1] << 8) |
-                               ((unsigned int)r->d[scan+2] << 16) | ((unsigned int)r->d[scan+3] << 24);
-            if (cnt < 16 || cnt > 40000) continue;
-            if (scan + 4 + (size_t)cnt * obj_stride > r->size) continue;
-            int good = 1, checks = cnt < 32 ? (int)cnt : 32;
-            for (int i = 0; i < checks; i++) {
-                const unsigned char *e = r->d + scan + 4 + (size_t)i * obj_stride;
-                unsigned short tile = (unsigned short)(e[2] | (e[3] << 8)) & 0x7FFF;
-                if (tile >= ntiles) { good = 0; break; }
+        /* TR1-3: WALK the blocks exactly (same approach as TR4). El content-scan
+           que habia aqui se enganchaba a zonas de CEROS: su unico test era
+           tile < ntiles, y tile=0 lo pasa, asi que un bloque de ceros valia como
+           tabla de object textures -> UVs a cero -> todas las caras muestreaban
+           la esquina (0,0) del atlas y el nivel salia de un color plano (verde en
+           Lara's Home). Si el recorrido no cuadra (bloques no documentados), se
+           cae al escaneo, pero ya con un validador que rechaza los ceros. */
+        r->at = rooms_end;
+        unsigned int n;
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* floor data */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* mesh data */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh pointers */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* animations (TR1-3: 32 B) */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 6);      /* state changes */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 8);      /* anim dispatches (8 B!) */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* anim commands */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh trees */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* frames */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 18);     /* models */
+        n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* static meshes */
+        unsigned int cnt = tr_u32(r);
+        size_t at = r->at;
+        if (!r->overrun && tr_objtex_valid(r->d, r->size, at, cnt, obj_stride, ntiles)) {
+            nobjtex = cnt; obj_at = at;
+        } else {
+            for (size_t scan = rooms_end; scan + 4 + (size_t)obj_stride * 32 <= r->size; scan += 2) {
+                unsigned int c2 = (unsigned int)r->d[scan] | ((unsigned int)r->d[scan+1] << 8) |
+                                  ((unsigned int)r->d[scan+2] << 16) | ((unsigned int)r->d[scan+3] << 24);
+                if (c2 < 16) continue;
+                if (tr_objtex_valid(r->d, r->size, scan + 4, c2, obj_stride, ntiles)) {
+                    nobjtex = c2; obj_at = scan + 4; break;
+                }
             }
-            if (good) { nobjtex = cnt; obj_at = scan + 4; break; }
         }
     }
 
@@ -414,6 +454,63 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         rm->idx = ni; rm->nidx = out;
     }
 
+    /* --- Quitar la LAMINA de agua del nivel (fea y estatica; la sustituye nuestra
+       agua animada) y de paso hacer que Lara CAIGA en la piscina. La lamina puede
+       estar en el room de agua O en el room SECO de encima, asi que: (1) recogemos
+       la superficie de cada room de agua (su Y y su huella X/Z); (2) borramos las
+       caras HORIZONTALES a esa Y que caen sobre esa huella, en CUALQUIER room. Al
+       no estar ya en la malla, dejan de verse Y dejan de ser colision -> cae. --- */
+    {
+        float *wy  = (float *)malloc((size_t)nrooms * sizeof(float));
+        float *wx0 = (float *)malloc((size_t)nrooms * sizeof(float));
+        float *wx1 = (float *)malloc((size_t)nrooms * sizeof(float));
+        float *wz0 = (float *)malloc((size_t)nrooms * sizeof(float));
+        float *wz1 = (float *)malloc((size_t)nrooms * sizeof(float));
+        int nws = 0;
+        if (wy && wx0 && wx1 && wz0 && wz1) {
+            for (int i = 0; i < nrooms; i++) {
+                TRRoom *rm = &rooms[i];
+                if (!rm->water || rm->nverts < 3) continue;
+                float maxy = rm->verts[0].position[1];
+                float mnx = rm->verts[0].position[0], mxx = mnx;
+                float mnz = rm->verts[0].position[2], mxz = mnz;
+                for (uint32_t v = 1; v < rm->nverts; v++) {
+                    float *p = rm->verts[v].position;
+                    if (p[1] > maxy) maxy = p[1];
+                    if (p[0] < mnx) mnx = p[0]; if (p[0] > mxx) mxx = p[0];
+                    if (p[2] < mnz) mnz = p[2]; if (p[2] > mxz) mxz = p[2];
+                }
+                wy[nws] = maxy; wx0[nws] = mnx; wx1[nws] = mxx;
+                wz0[nws] = mnz; wz1[nws] = mxz; nws++;
+            }
+            for (int i = 0; i < nrooms; i++) {
+                TRRoom *rm = &rooms[i];
+                if (rm->nverts < 3) continue;
+                uint32_t tris = rm->nverts / 3, ow = 0;
+                for (uint32_t tt = 0; tt < tris; tt++) {
+                    float *a = rm->verts[tt*3+0].position;
+                    float *b = rm->verts[tt*3+1].position;
+                    float *c = rm->verts[tt*3+2].position;
+                    float d01 = a[1]-b[1], d12 = b[1]-c[1];
+                    int surface = 0;
+                    if (d01 < 8.0f && d01 > -8.0f && d12 < 8.0f && d12 > -8.0f) {   /* horizontal */
+                        float fcx = (a[0]+b[0]+c[0]) / 3.0f, fcz = (a[2]+b[2]+c[2]) / 3.0f;
+                        for (int w = 0; w < nws; w++) {
+                            float dy = a[1] - wy[w];
+                            if (dy < 8.0f && dy > -8.0f &&
+                                fcx >= wx0[w]-4.0f && fcx <= wx1[w]+4.0f &&
+                                fcz >= wz0[w]-4.0f && fcz <= wz1[w]+4.0f) { surface = 1; break; }
+                        }
+                    }
+                    if (surface) continue;
+                    for (int k = 0; k < 3; k++) { rm->verts[ow] = rm->verts[tt*3+k]; rm->idx[ow] = ow; ow++; }
+                }
+                rm->nverts = ow; rm->nidx = ow;
+            }
+        }
+        free(wy); free(wx0); free(wx1); free(wz0); free(wz1);
+    }
+
     /* One submesh per room. */
     G3DMesh *meshes = (G3DMesh *)calloc((size_t)nrooms, sizeof(G3DMesh));
     void **texs = (void **)calloc((size_t)nrooms, sizeof(void *));
@@ -421,12 +518,14 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
        32-bit atlas in already built. */
     G3DTexture *atlas = prebuilt_atlas ? prebuilt_atlas
                                        : tr1_build_atlas(tiles, atlas_tiles, pal);
+    unsigned char *swater = (unsigned char *)calloc((size_t)nrooms, 1);
     int sub = 0;
     for (int i = 0; i < nrooms; i++) {
         TRRoom *rm = &rooms[i];
         if (rm->nidx == 0 || rm->nverts == 0) continue;
         G3DMesh *m = g3d_mesh_create("TRroom", rm->verts, rm->nverts, rm->idx, rm->nidx);
-        if (m) { meshes[sub] = *m; free(m); texs[sub] = atlas; sub++; }
+        if (m) { meshes[sub] = *m; free(m); texs[sub] = atlas;
+                 if (swater) swater[sub] = (unsigned char)rm->water; sub++; }
     }
     for (int i = 0; i < nrooms; i++) { free(rooms[i].verts); free(rooms[i].idx); free(face_tex[i]); }
     free(rooms); free(face_tex); free(face_n); free(otex);
@@ -450,6 +549,7 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
     model->meshes = meshes;
     model->mesh_count = (uint32_t)sub;
     model->mesh_textures = texs;
+    model->submesh_water = swater;
     model->albedo_texture = atlas;
     strncpy(model->filepath, filepath, sizeof(model->filepath) - 1);
     g3d_model_calculate_bounds(model);
