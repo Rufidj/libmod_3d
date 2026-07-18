@@ -23,6 +23,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 /* ---- little-endian reader that can't run off the end ---------------------- */
 
@@ -107,6 +108,10 @@ typedef struct {
     int water;                /* 1 if the room flags mark it as a water room */
 } TRRoom;
 
+/* An instance of a static mesh placed in the level (furniture, columns, plants).
+   Position is ABSOLUTE world (TR units); angle is a 16-bit turn (65536 = 360). */
+typedef struct { int x, y, z; unsigned short angle, object_id; } TRStatic;
+
 /* An object texture: which textile, and the UVs of its corners. */
 typedef struct {
     unsigned short tile;
@@ -183,6 +188,79 @@ static G3DTexture *tr1_build_atlas(const unsigned char *tiles, int ntiles,
    textiles + palette (TR1-3), or passed in already built from the 32-bit
    textiles (TR4, prebuilt_atlas). obj_stride is the object-texture record size:
    20 bytes in TR1-3, 38 in TR4. */
+static int16_t  rd_i16(const unsigned char *p) { return (int16_t)(p[0] | (p[1] << 8)); }
+static uint16_t rd_u16(const unsigned char *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t rd_u32(const unsigned char *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* Parse a static-mesh (TR1-3 tr_mesh) at byte offset `off` in the mesh pool `md`,
+   transform it to world by the instance (position + Y turn, TR's Y negated), and
+   build a flat textured-triangle vertex list (one vertex per index, like the room
+   second pass). Returns the vertex count (0 on failure); *out_v is malloc'd.
+   Coloured (untextured) faces are skipped. */
+static uint32_t tr_static_geom(const unsigned char *md, size_t mdsize, size_t off,
+                               int ix, int iy, int iz, unsigned short angle,
+                               const TRObjTex *otex, unsigned int nobjtex, int atlas_tiles,
+                               G3DVertex **out_v) {
+    if (!md || off + 12 > mdsize) return 0;
+    const unsigned char *p = md + off;
+    p += 6 + 4;                                  /* centre (6) + collision (int32, 4) */
+    int nv = rd_i16(p); p += 2;
+    if (nv <= 0 || (size_t)(p - md) + (size_t)nv * 6 > mdsize) return 0;
+
+    float a = (float)angle / 65536.0f * 6.28318530718f;   /* 65536 = 360 deg */
+    float ca = cosf(a), sa = sinf(a);
+    float *wx = (float *)malloc((size_t)nv * sizeof(float));
+    float *wy = (float *)malloc((size_t)nv * sizeof(float));
+    float *wz = (float *)malloc((size_t)nv * sizeof(float));
+    if (!wx || !wy || !wz) { free(wx); free(wy); free(wz); return 0; }
+    for (int v = 0; v < nv; v++) {
+        int vx = rd_i16(p), vy = rd_i16(p + 2), vz = rd_i16(p + 4); p += 6;
+        wx[v] = (float)ix + ((float)vx * ca + (float)vz * sa);   /* rotate XZ */
+        wy[v] = -(float)(iy + vy);                               /* TR Y points down */
+        wz[v] = (float)iz + (-(float)vx * sa + (float)vz * ca);
+    }
+    int nn = rd_i16(p); p += 2;
+    p += (nn > 0) ? (size_t)nn * 6 : (size_t)(-nn) * 2;   /* normals or per-vertex lights */
+    int ntr = rd_i16(p); p += 2;   const unsigned char *rects = p; p += (size_t)(ntr > 0 ? ntr : 0) * 10;
+    int ntt = rd_i16(p); p += 2;   const unsigned char *tris  = p; p += (size_t)(ntt > 0 ? ntt : 0) * 8;
+    if ((size_t)(p - md) > mdsize || ntr < 0 || ntt < 0) { free(wx); free(wy); free(wz); return 0; }
+
+    uint32_t nout = (uint32_t)ntr * 2 + (uint32_t)ntt;   /* triangles */
+    if (nout == 0) { free(wx); free(wy); free(wz); return 0; }
+    G3DVertex *ov = (G3DVertex *)malloc((size_t)nout * 3 * sizeof(G3DVertex));
+    if (!ov) { free(wx); free(wy); free(wz); return 0; }
+    uint32_t out = 0;
+#define TR_PUSH(idx, ot, corner) do {                                             \
+        int _i = (idx); if (_i < 0 || _i >= nv) _i = 0;                           \
+        G3DVertex _v; memset(&_v, 0, sizeof(_v));                                 \
+        _v.position[0] = wx[_i]; _v.position[1] = wy[_i]; _v.position[2] = wz[_i];\
+        _v.normal[1] = 1.0f;                                                      \
+        if (ot) { _v.texcoord[0] = (ot)->u[corner];                              \
+                  _v.texcoord[1] = ((ot)->v[corner] + (float)(ot)->tile) / (float)atlas_tiles; } \
+        ov[out++] = _v; } while (0)
+    for (int q = 0; q < ntr; q++) {
+        const unsigned char *e = rects + (size_t)q * 10;
+        int a0 = rd_u16(e), b0 = rd_u16(e + 2), c0 = rd_u16(e + 4), d0 = rd_u16(e + 6);
+        unsigned short tid = rd_u16(e + 8) & 0x7FFF;
+        const TRObjTex *ot = (tid < nobjtex) ? &otex[tid] : NULL;
+        TR_PUSH(a0, ot, 0); TR_PUSH(b0, ot, 1); TR_PUSH(c0, ot, 2);
+        TR_PUSH(a0, ot, 0); TR_PUSH(c0, ot, 2); TR_PUSH(d0, ot, 3);
+    }
+    for (int t = 0; t < ntt; t++) {
+        const unsigned char *e = tris + (size_t)t * 8;
+        int a0 = rd_u16(e), b0 = rd_u16(e + 2), c0 = rd_u16(e + 4);
+        unsigned short tid = rd_u16(e + 6) & 0x7FFF;
+        const TRObjTex *ot = (tid < nobjtex) ? &otex[tid] : NULL;
+        TR_PUSH(a0, ot, 0); TR_PUSH(b0, ot, 1); TR_PUSH(c0, ot, 2);
+    }
+#undef TR_PUSH
+    free(wx); free(wy); free(wz);
+    *out_v = ov;
+    return out;
+}
+
 static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
                                 const unsigned char *tiles, unsigned int ntiles,
                                 const unsigned char *pal,
@@ -204,6 +282,15 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
     unsigned short **face_tex = (unsigned short **)calloc((size_t)nrooms, sizeof(unsigned short *));
     uint32_t *face_n = (uint32_t *)calloc((size_t)nrooms, sizeof(uint32_t));
     if (!rooms || !face_tex || !face_n) { free(rooms); free(face_tex); free(face_n); return NULL; }
+
+    /* Static-mesh instances (furniture) placed in the rooms, plus the pointers to
+       the level's mesh pool / mesh pointers / static-mesh definitions, all captured
+       during parsing and used at the end to build one submesh per placed object.
+       Only wired for TR1-3 (the versions whose block layout we walk exactly). */
+    TRStatic *statics = NULL; int nstatics = 0, staticscap = 0;
+    const unsigned char *mesh_data = NULL; size_t mesh_data_size = 0;
+    const unsigned char *mptr_base = NULL; unsigned int nmp = 0;
+    const unsigned char *sdef_base = NULL; unsigned int nsdef = 0;
 
     for (int i = 0; i < nrooms; i++) {
         TRRoom *rm = &rooms[i];
@@ -264,7 +351,22 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         tr_skip(r, 2);                   /* ambient intensity */
         tr_skip(r, (size_t)after_amb);   /* TR2/3: extra ambient/light-mode */
         int nl = tr_u16(r); tr_skip(r, (size_t)nl * light_sz);
-        int nsm = tr_u16(r); tr_skip(r, (size_t)nsm * static_sz);
+        /* room static meshes: capture each instance (x,y,z absolute, angle, id). The
+           record is x,y,z (u32*3), rotation (u16), intensity(s), object_id (u16). */
+        int nsm = tr_u16(r);
+        for (int s = 0; s < nsm; s++) {
+            int ex = (int)tr_u32(r), ey = (int)tr_u32(r), ez = (int)tr_u32(r);
+            unsigned short ang = tr_u16(r);
+            tr_skip(r, (size_t)static_sz - 16);      /* intensity(1 in TR1, 2 in TR2/3) */
+            unsigned short oid = tr_u16(r);
+            if (nstatics >= staticscap) {
+                staticscap = staticscap ? staticscap * 2 : 128;
+                statics = (TRStatic *)realloc(statics, (size_t)staticscap * sizeof(TRStatic));
+            }
+            if (statics) { statics[nstatics].x = ex; statics[nstatics].y = ey;
+                           statics[nstatics].z = ez; statics[nstatics].angle = ang;
+                           statics[nstatics].object_id = oid; nstatics++; }
+        }
         tr_skip(r, 2);                   /* alternate room (i16) */
         unsigned short rflags = tr_u16(r);
         rm->water = (rflags & 0x0001) ? 1 : 0;   /* bit 0 = water room */
@@ -325,8 +427,10 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         r->at = rooms_end;
         unsigned int n;
         n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* floor data */
-        n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* mesh data */
-        n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh pointers */
+        n = tr_u32(r); mesh_data = r->d + r->at; mesh_data_size = (size_t)n * 2;
+                       tr_skip(r, (size_t)n * 2);      /* mesh data (the mesh pool) */
+        n = tr_u32(r); nmp = n; mptr_base = r->d + r->at;
+                       tr_skip(r, (size_t)n * 4);      /* mesh pointers (offsets) */
         n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* animations (TR1-3: 32 B) */
         n = tr_u32(r); tr_skip(r, (size_t)n * 6);      /* state changes */
         n = tr_u32(r); tr_skip(r, (size_t)n * 8);      /* anim dispatches (8 B!) */
@@ -334,7 +438,8 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         n = tr_u32(r); tr_skip(r, (size_t)n * 4);      /* mesh trees */
         n = tr_u32(r); tr_skip(r, (size_t)n * 2);      /* frames */
         n = tr_u32(r); tr_skip(r, (size_t)n * 18);     /* models */
-        n = tr_u32(r); tr_skip(r, (size_t)n * 32);     /* static meshes */
+        n = tr_u32(r); nsdef = n; sdef_base = r->d + r->at;
+                       tr_skip(r, (size_t)n * 32);     /* static mesh definitions */
         unsigned int cnt = tr_u32(r);
         size_t at = r->at;
         if (!r->overrun && tr_objtex_valid(r->d, r->size, at, cnt, obj_stride, ntiles)) {
@@ -511,14 +616,15 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         free(wy); free(wx0); free(wx1); free(wz0); free(wz1);
     }
 
-    /* One submesh per room. */
-    G3DMesh *meshes = (G3DMesh *)calloc((size_t)nrooms, sizeof(G3DMesh));
-    void **texs = (void **)calloc((size_t)nrooms, sizeof(void *));
+    /* One submesh per room, plus one per placed static mesh (furniture). */
+    size_t meshcap = (size_t)nrooms + (size_t)(nstatics > 0 ? nstatics : 0);
+    G3DMesh *meshes = (G3DMesh *)calloc(meshcap, sizeof(G3DMesh));
+    void **texs = (void **)calloc(meshcap, sizeof(void *));
     /* TR1-3 build the atlas here from 8-bit textiles + palette; TR4 passes its
        32-bit atlas in already built. */
     G3DTexture *atlas = prebuilt_atlas ? prebuilt_atlas
                                        : tr1_build_atlas(tiles, atlas_tiles, pal);
-    unsigned char *swater = (unsigned char *)calloc((size_t)nrooms, 1);
+    unsigned char *swater = (unsigned char *)calloc(meshcap, 1);
     int sub = 0;
     for (int i = 0; i < nrooms; i++) {
         TRRoom *rm = &rooms[i];
@@ -527,8 +633,37 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
         if (m) { meshes[sub] = *m; free(m); texs[sub] = atlas;
                  if (swater) swater[sub] = (unsigned char)rm->water; sub++; }
     }
+
+    /* --- Poblar el nivel: una submalla por instancia de static mesh (muebles,
+       columnas, plantas...). object_id -> definicion -> indice de mesh pointer ->
+       offset en el pool -> parseo + transformacion a mundo. --- */
+    int nstatic_built = 0;
+    if (meshes && texs && mesh_data && mptr_base && sdef_base && statics) {
+        for (int si = 0; si < nstatics; si++) {
+            int midx = -1;
+            for (unsigned int di = 0; di < nsdef; di++)
+                if (rd_u32(sdef_base + (size_t)di * 32) == statics[si].object_id) {
+                    midx = (int)rd_u16(sdef_base + (size_t)di * 32 + 4); break;
+                }
+            if (midx < 0 || (unsigned int)midx >= nmp) continue;
+            size_t moff = rd_u32(mptr_base + (size_t)midx * 4);
+            G3DVertex *sv = NULL;
+            uint32_t svn = tr_static_geom(mesh_data, mesh_data_size, moff,
+                                          statics[si].x, statics[si].y, statics[si].z,
+                                          statics[si].angle, otex, nobjtex, atlas_tiles, &sv);
+            if (svn < 3 || !sv) { free(sv); continue; }
+            uint32_t *sidx = (uint32_t *)malloc((size_t)svn * sizeof(uint32_t));
+            if (!sidx) { free(sv); continue; }
+            for (uint32_t k = 0; k < svn; k++) sidx[k] = k;
+            G3DMesh *m = g3d_mesh_create("TRstatic", sv, svn, sidx, svn);
+            free(sv); free(sidx);
+            if (m) { meshes[sub] = *m; free(m); texs[sub] = atlas;
+                     if (swater) swater[sub] = 0; sub++; nstatic_built++; }
+        }
+    }
+
     for (int i = 0; i < nrooms; i++) { free(rooms[i].verts); free(rooms[i].idx); free(face_tex[i]); }
-    free(rooms); free(face_tex); free(face_n); free(otex);
+    free(rooms); free(face_tex); free(face_n); free(otex); free(statics);
 
     if (sub == 0) { free(meshes); free(texs); return NULL; }
 
@@ -554,8 +689,8 @@ static G3DModel *tr_build_rooms(TRReader *r, const char *filepath, int ver,
     strncpy(model->filepath, filepath, sizeof(model->filepath) - 1);
     g3d_model_calculate_bounds(model);
 
-    printf("G3D: TR%d level loaded: %s (%d rooms, %u textiles, atlas %dx%d)\n",
-           ver, filepath, sub, ntiles, TEXTILE_W, TEXTILE_H * atlas_tiles);
+    printf("G3D: TR%d level loaded: %s (%d submeshes = %d rooms + %d objetos, %u textiles, atlas %dx%d)\n",
+           ver, filepath, sub, sub - nstatic_built, nstatic_built, ntiles, TEXTILE_W, TEXTILE_H * atlas_tiles);
     return model;
 }
 
