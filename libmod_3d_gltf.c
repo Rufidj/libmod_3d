@@ -237,6 +237,34 @@ static G3DTexture *load_image_texture(cgltf_image *img, const char *gltf_path) {
     return NULL;
 }
 
+/* Detecta la "cascara de contorno" del cel shading: una copia del modelo algo
+   mas grande, en negro puro, que debe dibujarse con culling de caras frontales
+   para que solo asome por el borde. Dibujada de forma normal tapa el modelo.
+   Se reconoce por el nombre del material (toon/outline/contour/cel) o por ser
+   negro puro sin textura de color base, que es la firma habitual.
+   Si acertara de mas, se puede corregir con g3d_material_set_outline(). */
+static int gltf_is_outline_material(cgltf_material *mat) {
+    if (!mat) return 0;
+
+    if (mat->name) {
+        char low[128]; size_t n = 0;
+        for (const char *c = mat->name; *c && n < sizeof(low) - 1; c++, n++)
+            low[n] = (*c >= 'A' && *c <= 'Z') ? (char)(*c + 32) : *c;
+        low[n] = 0;
+        if (strstr(low, "toon") || strstr(low, "outline") ||
+            strstr(low, "contour") || strstr(low, "_cel"))
+            return 1;
+    }
+
+    if (mat->has_pbr_metallic_roughness &&
+        !mat->pbr_metallic_roughness.base_color_texture.texture) {
+        const cgltf_float *c = mat->pbr_metallic_roughness.base_color_factor;
+        if (c[0] <= 0.02f && c[1] <= 0.02f && c[2] <= 0.02f && c[3] >= 0.9f)
+            return 1;   /* negro puro y opaco, sin textura */
+    }
+    return 0;
+}
+
 static G3DTexture *gltf_load_base_color(cgltf_material *mat,
                                         const char *gltf_path) {
     cgltf_texture *t = pick_albedo_texture(mat);
@@ -850,6 +878,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     int max_sub = (int)data->materials_count + 1 + anim_node_meshes;
     G3DMesh *meshes = (G3DMesh *)calloc(max_sub, sizeof(G3DMesh));
     void **textures = (void **)calloc(max_sub, sizeof(void *));
+    unsigned char *outline = (unsigned char *)calloc(max_sub, 1);
     int sub = 0;
 
     for (cgltf_size m = 0; m < data->materials_count; m++) {
@@ -859,6 +888,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
         meshes[sub] = *sm;           /* copy mesh struct into the array */
         free(sm);
         textures[sub] = gltf_load_base_color(&data->materials[m], filepath);
+        if (outline) outline[sub] = (unsigned char)gltf_is_outline_material(&data->materials[m]);
         sub++;
     }
     /* Primitives without a material */
@@ -968,6 +998,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     model->meshes = meshes;
     model->mesh_count = (uint32_t)sub;
     model->mesh_textures = textures;
+    model->mesh_outline = outline;
     model->albedo_texture = textures[0];
     strncpy(model->filepath, filepath, sizeof(model->filepath) - 1);
 
@@ -1020,6 +1051,7 @@ G3DModel *g3d_gltf_load_fractured(const char *filepath) {
     int max_sub = (int)data->nodes_count + 1;
     G3DMesh *meshes = (G3DMesh *)calloc(max_sub, sizeof(G3DMesh));
     void **textures = (void **)calloc(max_sub, sizeof(void *));
+    unsigned char *outline = (unsigned char *)calloc(max_sub, 1);
     int sub = 0;
 
     for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {

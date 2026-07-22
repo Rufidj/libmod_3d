@@ -559,6 +559,15 @@ int64_t g3d_material_set_texture_bgd(INSTANCE *my, int64_t *params) {
     }
     return 1;
 }
+/* Marca/desmarca un material como contorno toon (se dibuja con culling de caras
+   frontales). Sirve para corregir la deteccion automatica del cargador glTF. */
+int64_t g3d_material_set_outline_bgd(INSTANCE *my, int64_t *params) {
+    G3DMaterial *material = g3d_material_impl_get((int)params[0]);
+    if (!material) return 0;
+    material->outline = (int)params[1] ? 1 : 0;
+    return 1;
+}
+
 int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params) {
     /* (material, type 1=normal/2=metallic/3=roughness, texture handle) */
     g3d_material_impl_set_map((int)params[0], (int)params[1], (void *)(intptr_t)params[2]);
@@ -1028,6 +1037,7 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
     void **key_met = (void **)calloc(model->mesh_count, sizeof(void *));
     void **key_rgh = (void **)calloc(model->mesh_count, sizeof(void *));
     int *key_mat = (int *)calloc(model->mesh_count, sizeof(int));
+    unsigned char *key_out = (unsigned char *)calloc(model->mesh_count, 1);
     int key_count = 0;
 
     for (uint32_t j = 0; j < model->mesh_count; j++) {
@@ -1035,12 +1045,17 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
         void *nrm = model->mesh_normal ? model->mesh_normal[j] : NULL;
         void *met = model->mesh_metallic ? model->mesh_metallic[j] : NULL;
         void *rgh = model->mesh_roughness ? model->mesh_roughness[j] : NULL;
+        /* La cascara de contorno no lleva texturas, igual que otros materiales
+           planos, asi que entra en la clave: si no, se fusionarian y el contorno
+           acabaria aplicandose a piezas que no lo son (o al reves). */
+        unsigned char outl = model->mesh_outline ? model->mesh_outline[j] : 0;
 
         int mat = -1;
         if (key_mat) {
             for (int k = 0; k < key_count; k++) {
                 if (key_alb[k] == alb && key_nrm[k] == nrm &&
-                    key_met[k] == met && key_rgh[k] == rgh) {
+                    key_met[k] == met && key_rgh[k] == rgh &&
+                    (!key_out || key_out[k] == outl)) {
                     mat = key_mat[k];
                     break;
                 }
@@ -1057,6 +1072,7 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
                    as a bright "seam". High roughness keeps it flat and even. */
                 m->roughness = 0.9f;
                 m->metallic  = 0.0f;
+                m->outline   = outl;
                 if (nrm) g3d_material_impl_set_map(mat, 1, nrm);
                 if (met) g3d_material_impl_set_map(mat, 2, met);
                 if (rgh) g3d_material_impl_set_map(mat, 3, rgh);
@@ -1065,6 +1081,7 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
                 key_alb[key_count] = alb; key_nrm[key_count] = nrm;
                 key_met[key_count] = met; key_rgh[key_count] = rgh;
                 key_mat[key_count] = mat;
+                if (key_out) key_out[key_count] = outl;
                 key_count++;
             }
         }
@@ -1084,7 +1101,7 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
     if (model->mesh_count > (uint32_t)key_count)
         printf("G3D: model spawn: %u submeshes sharing %d materials\n",
                model->mesh_count, key_count);
-    free(key_alb); free(key_nrm); free(key_met); free(key_rgh); free(key_mat);
+    free(key_alb); free(key_nrm); free(key_met); free(key_rgh); free(key_mat); free(key_out);
 
     /* Far-LOD: one merged, decimated mesh drawn (with the model albedo) instead
        of all the submesh children when the model is beyond g3d_set_lod distance. */

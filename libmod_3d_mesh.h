@@ -117,6 +117,11 @@ typedef struct {
        material models, mesh_textures[i] is the albedo for meshes[i]. */
     void *albedo_texture;
     void **mesh_textures;
+    /* Per-submesh flag: 1 = this submesh is a TOON OUTLINE shell (a slightly
+       enlarged pure-black copy of the model). It must be drawn with FRONT-face
+       culling so only the silhouette rim shows; drawn normally it just covers
+       the model in black. NULL when the model has no outline submesh. */
+    unsigned char *mesh_outline;
     void **mesh_normal;      /* per-submesh normal / metallic / roughness maps (NULL if none) */
     void **mesh_metallic;
     void **mesh_roughness;

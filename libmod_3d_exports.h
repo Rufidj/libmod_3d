@@ -346,6 +346,7 @@ int64_t g3d_rigidbody_render_z_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_mesh_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_material_set_outline_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_submesh_map_bgd(INSTANCE *my, int64_t *params);
 
 DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
@@ -644,6 +645,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_ENTITY_SET_BLEND", "II", TYPE_INT, g3d_entity_set_blend_bgd),
     FUNC("G3D_MATERIAL_SET_TEXTURE", "III", TYPE_INT, g3d_material_set_texture_bgd),
     FUNC("G3D_MATERIAL_SET_MAP", "III", TYPE_INT, g3d_material_set_map_bgd),
+    FUNC("G3D_MATERIAL_SET_OUTLINE", "II", TYPE_INT, g3d_material_set_outline_bgd),
     FUNC("G3D_MODEL_SUBMESH_MAP", "III", TYPE_INT, g3d_model_submesh_map_bgd),
     FUNC(NULL, NULL, 0, NULL)};
 
