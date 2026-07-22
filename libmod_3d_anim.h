@@ -14,6 +14,9 @@ extern "C" {
 /* Number of animations the model carries. */
 int g3d_model_animation_count(G3DModel *model);
 
+/* 1 si el modelo tiene esqueleto (skin): solo esos necesitan animarse cada frame. */
+int g3d_model_is_skinned(G3DModel *model);
+
 /* Name of animation `i` ("" if out of range). */
 const char *g3d_model_animation_name(G3DModel *model, int i);
 

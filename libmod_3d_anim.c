@@ -19,6 +19,15 @@ int g3d_model_animation_count(G3DModel *model) {
     return model ? model->animation_count : 0;
 }
 
+/* 1 si el modelo tiene esqueleto (skin). Los modelos CON esqueleto hay que
+   animarlos cada frame o las matrices de joints quedan a cero y la malla se
+   colapsa. Los que NO lo tienen no lo necesitan, y animarlos a ciegas los
+   estropea: muchos modelos (p.ej. de Sketchfab) traen animaciones que mueven y
+   escalan sus nodos, y reproducirlas sin querer descoloca las piezas. */
+int g3d_model_is_skinned(G3DModel *model) {
+    return model ? model->skinned : 0;
+}
+
 /* Name of animation `i` (empty string if out of range). For editor listings. */
 const char *g3d_model_animation_name(G3DModel *model, int i) {
     if (!model || i < 0 || i >= model->animation_count) return "";
