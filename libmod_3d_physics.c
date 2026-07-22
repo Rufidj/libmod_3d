@@ -494,6 +494,7 @@ typedef struct {
     float avx, avy, avz;     /* angular velocity (rad/s)                       */
     float inv_inertia;       /* scalar inverse inertia (box approximation)     */
     float lin_damp, ang_damp;/* resistencia del medio (0 = vacio, agua ~2.5)   */
+    float upright;           /* fuerza de adrizamiento (0 = no se endereza)   */
     float ox, oy, oz;        /* body-centre -> model-origin offset (render)    */
     int   grounded;
     int   active;
@@ -531,6 +532,15 @@ void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz) {
     G3DBody *b = &g_bodies[id];
     b->vx += ix * b->inv_mass; b->vy += iy * b->inv_mass; b->vz += iz * b->inv_mass;
     if (iy > 0.0f) b->grounded = 0;
+}
+void g3d_rigidbody_set_upright(int id, float strength) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    g_bodies[id].upright = strength > 0.0f ? strength : 0.0f;
+}
+void g3d_rigidbody_apply_angular_impulse(int id, float ax, float ay, float az) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    G3DBody *b = &g_bodies[id];
+    b->avx += ax * b->inv_inertia; b->avy += ay * b->inv_inertia; b->avz += az * b->inv_inertia;
 }
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz) {
     if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
@@ -634,6 +644,14 @@ void g3d_rigidbody_step(float dt) {
         G3DBody *b = &g_bodies[i];
         if (!b->active || b->inv_mass == 0.0f) continue;
         b->vy -= g_gravity * dt;
+        /* Adrizamiento: par = cross(arriba_del_cuerpo, arriba_del_mundo). Eje y
+           magnitud salen a la vez y vale para cualquier orientacion. */
+        if (b->upright > 0.0f) {
+            Vec3 up = quat_rotate_vec3(b->orient, vec3_make(0.0f, 1.0f, 0.0f));
+            /* cross(up, (0,1,0)) = (up.z, 0, -up.x) */
+            float k = b->upright * b->inv_inertia * dt;
+            b->avx += up.z * k; b->avz += -up.x * k;
+        }
         /* Resistencia del medio. En el aire es 0 y no cambia nada; en el agua
            frena, que es lo que impide que un cuerpo que flota conserve su
            velocidad horizontal para siempre y cruce el lago patinando. */

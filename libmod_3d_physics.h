@@ -126,6 +126,11 @@ void g3d_rigidbody_step(float dt);                    /* advance the whole world
 
 void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz);
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz);
+/* Adrizamiento continuo: lleva el "arriba" del cuerpo hacia el del mundo. Es lo
+   que hace que lo que flota se enderece en vez de quedarse inclinado. 0 = nada. */
+void g3d_rigidbody_set_upright(int id, float strength);
+/* Impulso angular (gira sin desplazar): p.ej. enderezar lo que flota. */
+void g3d_rigidbody_apply_angular_impulse(int id, float ax, float ay, float az);
 /* Resistencia del medio: 0 = vacio (por defecto), ~2.5 = agua. -1 deja el valor. */
 void g3d_rigidbody_set_damping(int id, float lin, float ang);
 void g3d_rigidbody_set_bounce(int id, float restitution, float friction);

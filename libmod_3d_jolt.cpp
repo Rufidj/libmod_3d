@@ -77,7 +77,7 @@ static bool    g_inited   = false;
 static bool    g_terrain_added = false;
 static float   g_gravity  = 24.0f;
 
-struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; };
+struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; float upright; };
 static JRBody g_rb[JRB_MAX];
 static int    g_mesh_count = 0;   /* # of static trimesh colliders (level geometry) */
 
@@ -156,7 +156,7 @@ static int jrb_add_dynamic(Shape *shape, float x, float y, float z, float mass,
     BodyID bid = g_ps->GetBodyInterface().CreateAndAddBody(bcs, EActivation::Activate);
     g_rb[s].id = bid; g_rb[s].hx = hx; g_rb[s].hy = hy; g_rb[s].hz = hz;
     g_rb[s].ox = 0.0f; g_rb[s].oy = oy; g_rb[s].oz = 0.0f;
-    g_rb[s].active = 1;
+    g_rb[s].upright = 0.0f; g_rb[s].active = 1;
     return s;
 }
 
@@ -262,7 +262,8 @@ int g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, f
     int s = jrb_slot();
     if (s < 0) return -1;
     g_rb[s].id = bid; g_rb[s].hx = g_rb[s].hy = g_rb[s].hz = 0.0f;
-    g_rb[s].ox = g_rb[s].oy = g_rb[s].oz = 0.0f; g_rb[s].active = 1;
+    g_rb[s].ox = g_rb[s].oy = g_rb[s].oz = 0.0f;
+    g_rb[s].upright = 0.0f; g_rb[s].active = 1;
     g_mesh_count++;
     return s;
 }
@@ -275,10 +276,31 @@ void g3d_rigidbody_destroy(int id) {
 }
 void g3d_rigidbody_clear(void) { for (int i = 0; i < JRB_MAX; i++) g3d_rigidbody_destroy(i); g_mesh_count = 0; }
 
+/* Adrizamiento: lleva el "arriba" del cuerpo hacia el "arriba" del mundo.
+   El par correcto es cross(arriba_del_cuerpo, arriba_del_mundo): eje y magnitud
+   salen a la vez y funciona con cualquier orientacion. Hacerlo con angulos de
+   Euler desde el script no vale, porque con giro combinado el eje no apunta
+   donde debe y el cuerpo acaba dando vueltas en vez de enderezarse. */
+static void jolt_apply_upright(float dt) {
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    for (int i = 0; i < JRB_MAX; i++) {
+        if (!g_rb[i].active || g_rb[i].upright <= 0.0f) continue;
+        Vec3 up = bi.GetRotation(g_rb[i].id) * Vec3(0, 1, 0);
+        Vec3 tor = up.Cross(Vec3(0, 1, 0));            /* 0 si ya esta derecho */
+        if (tor.LengthSq() < 1.0e-8f) continue;
+        bi.ActivateBody(g_rb[i].id);
+        bi.AddAngularImpulse(g_rb[i].id, tor * (g_rb[i].upright * dt));
+    }
+}
+void g3d_rigidbody_set_upright(int id, float strength) {
+    if (!jrb_ok(id)) return;
+    g_rb[id].upright = strength > 0.0f ? strength : 0.0f;
+}
 void g3d_rigidbody_step(float dt) {
     if (!g_inited) return;
     jolt_add_terrain();
     if (dt <= 0.0f) return; if (dt > 0.05f) dt = 0.05f;
+    jolt_apply_upright(dt);
     g_ps->Update(dt, 1, g_temp, g_job);
 }
 
@@ -292,6 +314,15 @@ void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz) {
     BodyInterface &bi = g_ps->GetBodyInterface();
     bi.ActivateBody(g_rb[id].id);
     bi.AddImpulse(g_rb[id].id, Vec3(ix, iy, iz));
+}
+/* Impulso angular: gira el cuerpo sin moverlo de sitio. Hace falta, por ejemplo,
+   para enderezar lo que flota: la flotacion empuja desde el centro y por si sola
+   no endereza nada, asi que un barril se quedaria inclinado como cayo. */
+void g3d_rigidbody_apply_angular_impulse(int id, float ax, float ay, float az) {
+    if (!jrb_ok(id)) return;
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    bi.ActivateBody(g_rb[id].id);
+    bi.AddAngularImpulse(g_rb[id].id, Vec3(ax, ay, az));
 }
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz) {
     if (!jrb_ok(id)) return;

@@ -2215,6 +2215,15 @@ int64_t g3d_rigidbody_apply_impulse_bgd(INSTANCE *my, int64_t *params) {
     g3d_rigidbody_apply_impulse((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
     return 1;
 }
+int64_t g3d_rigidbody_set_upright_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_upright((int)params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_rigidbody_apply_angular_impulse_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_apply_angular_impulse((int)params[0], *(float *)&params[1],
+                                        *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
 int64_t g3d_rigidbody_set_damping_bgd(INSTANCE *my, int64_t *params) {
     g3d_rigidbody_set_damping((int)params[0], *(float *)&params[1], *(float *)&params[2]);
     return 1;
