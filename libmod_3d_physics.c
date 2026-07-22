@@ -493,6 +493,7 @@ typedef struct {
     Quat  orient;            /* orientation (free tumble in the air)           */
     float avx, avy, avz;     /* angular velocity (rad/s)                       */
     float inv_inertia;       /* scalar inverse inertia (box approximation)     */
+    float lin_damp, ang_damp;/* resistencia del medio (0 = vacio, agua ~2.5)   */
     float ox, oy, oz;        /* body-centre -> model-origin offset (render)    */
     int   grounded;
     int   active;
@@ -534,6 +535,11 @@ void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz) {
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz) {
     if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
     g_bodies[id].vx = vx; g_bodies[id].vy = vy; g_bodies[id].vz = vz;
+}
+void g3d_rigidbody_set_damping(int id, float lin, float ang) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    if (lin >= 0.0f) g_bodies[id].lin_damp = lin;
+    if (ang >= 0.0f) g_bodies[id].ang_damp = ang;
 }
 void g3d_rigidbody_set_bounce(int id, float restitution, float friction) {
     if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
@@ -628,6 +634,17 @@ void g3d_rigidbody_step(float dt) {
         G3DBody *b = &g_bodies[i];
         if (!b->active || b->inv_mass == 0.0f) continue;
         b->vy -= g_gravity * dt;
+        /* Resistencia del medio. En el aire es 0 y no cambia nada; en el agua
+           frena, que es lo que impide que un cuerpo que flota conserve su
+           velocidad horizontal para siempre y cruce el lago patinando. */
+        if (b->lin_damp > 0.0f) {
+            float d = 1.0f - b->lin_damp * dt; if (d < 0.0f) d = 0.0f;
+            b->vx *= d; b->vy *= d; b->vz *= d;
+        }
+        if (b->ang_damp > 0.0f) {
+            float d = 1.0f - b->ang_damp * dt; if (d < 0.0f) d = 0.0f;
+            b->avx *= d; b->avy *= d; b->avz *= d;
+        }
         b->px += b->vx * dt; b->py += b->vy * dt; b->pz += b->vz * dt;
         float wl = sqrtf(b->avx*b->avx + b->avy*b->avy + b->avz*b->avz);
         if (wl > 1e-5f) {

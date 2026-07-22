@@ -22,6 +22,7 @@
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
@@ -303,6 +304,17 @@ void g3d_rigidbody_set_angular_velocity(int id, float wx, float wy, float wz) {
     BodyInterface &bi = g_ps->GetBodyInterface();
     bi.ActivateBody(g_rb[id].id);      /* idem: si duerme, no haria caso */
     bi.SetAngularVelocity(g_rb[id].id, Vec3(wx, wy, wz));
+}
+/* Resistencia del medio. Jolt la aplica el mismo en cada substep, que es mucho
+   mejor que frenar a mano desde el script una vez por frame. */
+void g3d_rigidbody_set_damping(int id, float lin, float ang) {
+    if (!jrb_ok(id)) return;
+    BodyLockWrite lock(g_ps->GetBodyLockInterface(), g_rb[id].id);
+    if (!lock.Succeeded()) return;
+    MotionProperties *mp = lock.GetBody().GetMotionProperties();
+    if (!mp) return;
+    if (lin >= 0.0f) mp->SetLinearDamping(lin);
+    if (ang >= 0.0f) mp->SetAngularDamping(ang);
 }
 void g3d_rigidbody_set_bounce(int id, float restitution, float friction) {
     if (!jrb_ok(id)) return;

@@ -126,6 +126,8 @@ void g3d_rigidbody_step(float dt);                    /* advance the whole world
 
 void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz);
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz);
+/* Resistencia del medio: 0 = vacio (por defecto), ~2.5 = agua. -1 deja el valor. */
+void g3d_rigidbody_set_damping(int id, float lin, float ang);
 void g3d_rigidbody_set_bounce(int id, float restitution, float friction);
 
 float g3d_rigidbody_x(int id);
