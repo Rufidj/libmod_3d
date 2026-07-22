@@ -1878,10 +1878,25 @@ void g3d_renderer_render_mesh(void *mesh, void *material, Mat4 model_matrix,
         g3d_shader_set_float(shader, "uFogEnd", g_renderer.fog_end);
     }
 
+    /* CONTORNO TOON: la cascara negra es una copia agrandada del modelo. Si se
+       dibuja normal, lo tapa entero. Dibujandola con culling de caras FRONTALES
+       solo se ven sus caras traseras, que el propio modelo oculta salvo en el
+       borde -> queda el contorno negro de la silueta. */
+    int outline_cull = (g3d_material && g3d_material->outline);
+    if (outline_cull) {
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+    }
+
     /* Bind and render mesh */
     glBindVertexArray(g3d_mesh->vao);
     glDrawElements(GL_TRIANGLES, g3d_mesh->index_count, GL_UNSIGNED_INT, 0);
     glBindVertexArray(0);
+
+    if (outline_cull) {                 /* restaurar el estado de culling */
+        glCullFace(GL_BACK);
+        if (g_backface_cull) glEnable(GL_CULL_FACE); else glDisable(GL_CULL_FACE);
+    }
 
 #endif
 

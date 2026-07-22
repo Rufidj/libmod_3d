@@ -83,6 +83,10 @@ typedef struct {
        centered at origin, spanning terrain_world_size units. Enables editing. */
     int terrain_side;
     float terrain_world_size;
+    /* Optional per-cell hole mask ((side-1)*(side-1) bytes, 1 = hole). NULL when
+       the terrain has no holes. A hole drops that cell's two triangles from the
+       EBO so you can see through the ground (e.g. into a voxel cave below). */
+    unsigned char *terrain_holes;
 
     /* Skinning (CPU). All NULL / 0 when the mesh is not skinned. */
     int skinned;
@@ -113,6 +117,11 @@ typedef struct {
        material models, mesh_textures[i] is the albedo for meshes[i]. */
     void *albedo_texture;
     void **mesh_textures;
+    /* Per-submesh flag: 1 = this submesh is a TOON OUTLINE shell (a slightly
+       enlarged pure-black copy of the model). It must be drawn with FRONT-face
+       culling so only the silhouette rim shows; drawn normally it just covers
+       the model in black. NULL when the model has no outline submesh. */
+    unsigned char *mesh_outline;
     void **mesh_normal;      /* per-submesh normal / metallic / roughness maps (NULL if none) */
     void **mesh_metallic;
     void **mesh_roughness;
@@ -133,6 +142,7 @@ typedef struct {
     Quat *node_cur_r;
     Vec3 *node_cur_s;
     Mat4 *node_global;          /* computed global transform per node */
+    char **node_name;           /* node names (for attaching weapons to a bone) */
 
     /* Skin joints */
     int joint_count;

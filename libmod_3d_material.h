@@ -22,6 +22,9 @@ typedef struct {
 
     /* Metallic/Roughness PBR */
     float metallic;
+    /* 1 = material de contorno toon: se dibuja con culling de caras FRONTALES,
+       de modo que la cascara negra solo asoma por el borde de la silueta. */
+    int outline;
     float roughness;
 
     /* Texture IDs */
