@@ -22,6 +22,7 @@
 #include <Jolt/Physics/Collision/Shape/MeshShape.h>
 #include <Jolt/Physics/Collision/Shape/HeightFieldShape.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
+#include <Jolt/Physics/Body/BodyLock.h>
 #include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollideShape.h>
@@ -76,7 +77,8 @@ static bool    g_inited   = false;
 static bool    g_terrain_added = false;
 static float   g_gravity  = 24.0f;
 
-struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; };
+struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; float upright;
+                float mass; float buoy_y, buoy_dens; };
 static JRBody g_rb[JRB_MAX];
 static int    g_mesh_count = 0;   /* # of static trimesh colliders (level geometry) */
 
@@ -144,17 +146,25 @@ static int jrb_add_dynamic(Shape *shape, float x, float y, float z, float mass,
                            float hx, float hy, float hz, float oy) {
     int s = jrb_slot();
     if (s < 0) return -1;
+    /* masa 0 = cuerpo FIJO: choca con todo pero no lo mueve nada. Es lo que hace
+       falta para el decorado solido (un barco, una roca, un cajon que no se
+       empuja) sin tener que ponerle un muro invisible a mano encima. Antes se
+       creaba dinamico igualmente y salia flotando a la deriva. */
+    bool fijo = (mass <= 0.0f);
     BodyCreationSettings bcs(shape, RVec3(x, y, z), Quat::sIdentity(),
-                             EMotionType::Dynamic, Layers::MOVING);
+                             fijo ? EMotionType::Static  : EMotionType::Dynamic,
+                             fijo ? Layers::NON_MOVING   : Layers::MOVING);
     bcs.mRestitution = 0.12f;
     bcs.mFriction    = 0.55f;
-    if (mass > 0.0f) {
+    if (!fijo) {
         bcs.mOverrideMassProperties = EOverrideMassProperties::CalculateInertia;
         bcs.mMassPropertiesOverride.mMass = mass;
     }
     BodyID bid = g_ps->GetBodyInterface().CreateAndAddBody(bcs, EActivation::Activate);
     g_rb[s].id = bid; g_rb[s].hx = hx; g_rb[s].hy = hy; g_rb[s].hz = hz;
     g_rb[s].ox = 0.0f; g_rb[s].oy = oy; g_rb[s].oz = 0.0f;
+    g_rb[s].upright = 0.0f; g_rb[s].mass = mass > 0.0f ? mass : 1.0f;
+    g_rb[s].buoy_dens = 0.0f; g_rb[s].buoy_y = 0.0f;
     g_rb[s].active = 1;
     return s;
 }
@@ -261,7 +271,9 @@ int g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, f
     int s = jrb_slot();
     if (s < 0) return -1;
     g_rb[s].id = bid; g_rb[s].hx = g_rb[s].hy = g_rb[s].hz = 0.0f;
-    g_rb[s].ox = g_rb[s].oy = g_rb[s].oz = 0.0f; g_rb[s].active = 1;
+    g_rb[s].ox = g_rb[s].oy = g_rb[s].oz = 0.0f;
+    g_rb[s].upright = 0.0f; g_rb[s].mass = 1.0f;
+    g_rb[s].buoy_dens = 0.0f; g_rb[s].buoy_y = 0.0f; g_rb[s].active = 1;
     g_mesh_count++;
     return s;
 }
@@ -274,24 +286,180 @@ void g3d_rigidbody_destroy(int id) {
 }
 void g3d_rigidbody_clear(void) { for (int i = 0; i < JRB_MAX; i++) g3d_rigidbody_destroy(i); g_mesh_count = 0; }
 
+/* Adrizamiento: lleva el "arriba" del cuerpo hacia el "arriba" del mundo.
+   El par correcto es cross(arriba_del_cuerpo, arriba_del_mundo): eje y magnitud
+   salen a la vez y funciona con cualquier orientacion. Hacerlo con angulos de
+   Euler desde el script no vale, porque con giro combinado el eje no apunta
+   donde debe y el cuerpo acaba dando vueltas en vez de enderezarse. */
+static void jolt_apply_upright(float dt) {
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    for (int i = 0; i < JRB_MAX; i++) {
+        if (!g_rb[i].active || g_rb[i].upright <= 0.0f) continue;
+        Vec3 up = bi.GetRotation(g_rb[i].id) * Vec3(0, 1, 0);
+        Vec3 tor = up.Cross(Vec3(0, 1, 0));            /* (-up.z, 0, up.x); 0 si ya esta derecho */
+        if (tor.LengthSq() < 1.0e-8f) continue;
+        bi.ActivateBody(g_rb[i].id);
+        bi.AddAngularImpulse(g_rb[i].id, tor * (g_rb[i].upright * dt));
+    }
+}
+/* Flotacion REAL: el empuje no se aplica en el centro, se reparte por el volumen
+   sumergido. El cuerpo se divide en 8 celdas y cada una empuja segun lo hundida
+   que este, en su propia posicion. De ahi salen solos el par que endereza y la
+   estabilidad: uno ancho y bajo aguanta, uno alto y estrecho vuelca, y un
+   empujon suficientemente fuerte tumba a cualquiera. Nada de esto esta escrito
+   en ninguna parte, es consecuencia de donde empuja el agua.
+
+   densidad es relativa al agua: <1 flota, 1 queda a flor, >1 se hunde. */
+void g3d_rigidbody_set_buoyancy(int id, float water_y, float rel_density) {
+    if (!jrb_ok(id)) return;
+    g_rb[id].buoy_y = water_y;
+    g_rb[id].buoy_dens = rel_density > 0.0f ? rel_density : 0.0f;
+}
+static void jolt_apply_buoyancy(float dt) {
+    const int N = 4;                    /* 4x4x4 = 64 celdas */
+    const float inv = 1.0f / (float)(N*N*N);
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    for (int i = 0; i < JRB_MAX; i++) {
+        JRBody &b = g_rb[i];
+        if (!b.active || b.buoy_dens <= 0.0f) continue;
+        float hx = b.hx > 0.01f ? b.hx : 0.5f;
+        float hy = b.hy > 0.01f ? b.hy : 0.5f;
+        float hz = b.hz > 0.01f ? b.hz : 0.5f;
+        RVec3 pos = bi.GetPosition(b.id);
+        Quat  rot = bi.GetRotation(b.id);
+        /* Empuje a inmersion total = peso / densidad relativa: con densidad 0.5 el
+           cuerpo aguanta el doble de su peso, o sea flota a media agua. */
+        float cellF = b.mass * g_gravity / b.buoy_dens * inv;
+        float ramp  = 2.0f * hy / (float)N;         /* altura de una celda */
+        /* Se acumulan fuerza y par y se aplican de una vez: es lo mismo que 64
+           impulsos en 64 puntos, pero sin 64 bloqueos del cuerpo. */
+        float Fy = 0.0f; float Tx = 0.0f, Tz = 0.0f;
+        for (int ix = 0; ix < N; ix++)
+        for (int iy = 0; iy < N; iy++)
+        for (int iz = 0; iz < N; iz++) {
+            /* centro de la celda en coordenadas del cuerpo */
+            Vec3 loc(hx * (2.0f*(ix+0.5f)/N - 1.0f),
+                     hy * (2.0f*(iy+0.5f)/N - 1.0f),
+                     hz * (2.0f*(iz+0.5f)/N - 1.0f));
+            Vec3 r = rot * loc;                     /* brazo respecto al centro */
+            float f = (b.buoy_y - (pos.GetY() + r.GetY())) / ramp + 0.5f;
+            if (f <= 0.0f) continue; if (f > 1.0f) f = 1.0f;
+            float J = cellF * f * dt;
+            Fy += J;
+            /* par = r x (0,J,0) = (-r.z*J, 0, +r.x*J) */
+            Tx -= r.GetZ() * J;
+            Tz += r.GetX() * J;
+        }
+        if (Fy <= 0.0f) continue;                   /* fuera del agua */
+        /* Si el empuje supera al peso el cuerpo deberia subir: hay que despertarlo,
+           porque dormido ignoraria los impulsos y se quedaria hundido. */
+        if (Fy > b.mass * g_gravity * dt) bi.ActivateBody(b.id);
+        bi.AddImpulse(b.id, Vec3(0.0f, Fy, 0.0f));
+        bi.AddAngularImpulse(b.id, Vec3(Tx, 0.0f, Tz));
+    }
+}
+/* El personaje empuja los cuerpos. No es un cuerpo de Jolt (es un controlador
+   propio con su deslizamiento en pendiente, su ground snap y su modo nado), asi
+   que el contacto no sale solo: se busca que cuerpos toca la capsula y se les
+   iguala la velocidad hacia donde empuja, sin pasarse. Asi un barril flotando se
+   deja empujar y uno pesado apenas se mueve, que es lo que uno espera. */
+void g3d_jolt_char_push(float *px, float py, float *pz, float radius, float height,
+                        float cvx, float cvz, float fuerza, float dt) {
+    if (!g_inited || !g_ps || dt <= 0.0f) return;
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    for (int i = 0; i < JRB_MAX; i++) {
+        JRBody &b = g_rb[i];
+        if (!b.active) continue;
+        RVec3 bp = bi.GetPosition(b.id);
+        float dx = (float)bp.GetX() - *px, dz = (float)bp.GetZ() - *pz;
+        float br = b.hx > b.hz ? b.hx : b.hz;
+        float reach = radius + br;
+        float d2 = dx*dx + dz*dz;
+        if (d2 > reach*reach) continue;
+        float by = (float)bp.GetY();
+        if (by + b.hy < py || by - b.hy > py + height) continue;   /* no se solapan en altura */
+        float d = sqrtf(d2);
+        float nx, nz;
+        if (d < 1.0e-4f) { nx = 1.0f; nz = 0.0f; d = 0.0f; }       /* justo encima: aparta a un lado */
+        else             { nx = dx/d; nz = dz/d; }
+
+        /* El cuerpo frena al personaje: sin esto lo atravesaba y el empujon duraba
+           dos frames. Se saca al personaje del solape, y por eso el cuerpo va
+           delante mientras siga andando contra el. */
+        float dentro = reach - d;
+        if (dentro > 0.0f) { *px -= nx * dentro; *pz -= nz * dentro; }
+
+        float hacia = cvx*nx + cvz*nz;              /* velocidad del personaje hacia el cuerpo */
+        if (hacia <= 0.0f) continue;                /* se aleja: no empuja */
+        Vec3 v = bi.GetLinearVelocity(b.id);
+        float vn = v.GetX()*nx + v.GetZ()*nz;
+        if (vn >= hacia) continue;                  /* ya va mas rapido que el empuje */
+        /* La masa tiene que importar: el personaje solo puede hacer una fuerza,
+           no igualar velocidades. Sin este tope, un barril de 50 kg salia
+           disparado igual que uno de 1 kg. Lo pesado apenas se mueve y encima le
+           corta el paso, porque de el si que lo aparta siempre. */
+        float J = (hacia - vn) * b.mass;            /* el que haria falta */
+        float Jmax = fuerza * dt;                   /* el que puede hacer */
+        if (J > Jmax) J = Jmax;
+        bi.ActivateBody(b.id);
+        bi.AddImpulse(b.id, Vec3(nx*J, 0.0f, nz*J));
+    }
+}
+void g3d_rigidbody_set_upright(int id, float strength) {
+    if (!jrb_ok(id)) return;
+    g_rb[id].upright = strength > 0.0f ? strength : 0.0f;
+}
 void g3d_rigidbody_step(float dt) {
     if (!g_inited) return;
     jolt_add_terrain();
     if (dt <= 0.0f) return; if (dt > 0.05f) dt = 0.05f;
+    jolt_apply_upright(dt);
+    jolt_apply_buoyancy(dt);
     g_ps->Update(dt, 1, g_temp, g_job);
 }
 
 void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz) {
     if (!jrb_ok(id)) return;
-    g_ps->GetBodyInterface().AddImpulse(g_rb[id].id, Vec3(ix, iy, iz));
+    /* Jolt duerme los cuerpos que se quedan quietos, y un cuerpo dormido IGNORA
+       los impulsos. Sin despertarlo, cosas como la flotacion no funcionaban: un
+       barril se hundia, se posaba en el fondo, se dormia y ya no habia empuje
+       que lo sacara. Si alguien aplica un impulso, espera que el cuerpo
+       reaccione. */
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    bi.ActivateBody(g_rb[id].id);
+    bi.AddImpulse(g_rb[id].id, Vec3(ix, iy, iz));
+}
+/* Impulso angular: gira el cuerpo sin moverlo de sitio. Hace falta, por ejemplo,
+   para enderezar lo que flota: la flotacion empuja desde el centro y por si sola
+   no endereza nada, asi que un barril se quedaria inclinado como cayo. */
+void g3d_rigidbody_apply_angular_impulse(int id, float ax, float ay, float az) {
+    if (!jrb_ok(id)) return;
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    bi.ActivateBody(g_rb[id].id);
+    bi.AddAngularImpulse(g_rb[id].id, Vec3(ax, ay, az));
 }
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz) {
     if (!jrb_ok(id)) return;
-    g_ps->GetBodyInterface().SetLinearVelocity(g_rb[id].id, Vec3(vx, vy, vz));
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    bi.ActivateBody(g_rb[id].id);      /* un cuerpo dormido ignoraria la velocidad */
+    bi.SetLinearVelocity(g_rb[id].id, Vec3(vx, vy, vz));
 }
 void g3d_rigidbody_set_angular_velocity(int id, float wx, float wy, float wz) {
     if (!jrb_ok(id)) return;
-    g_ps->GetBodyInterface().SetAngularVelocity(g_rb[id].id, Vec3(wx, wy, wz));
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    bi.ActivateBody(g_rb[id].id);      /* idem: si duerme, no haria caso */
+    bi.SetAngularVelocity(g_rb[id].id, Vec3(wx, wy, wz));
+}
+/* Resistencia del medio. Jolt la aplica el mismo en cada substep, que es mucho
+   mejor que frenar a mano desde el script una vez por frame. */
+void g3d_rigidbody_set_damping(int id, float lin, float ang) {
+    if (!jrb_ok(id)) return;
+    BodyLockWrite lock(g_ps->GetBodyLockInterface(), g_rb[id].id);
+    if (!lock.Succeeded()) return;
+    MotionProperties *mp = lock.GetBody().GetMotionProperties();
+    if (!mp) return;
+    if (lin >= 0.0f) mp->SetLinearDamping(lin);
+    if (ang >= 0.0f) mp->SetAngularDamping(ang);
 }
 void g3d_rigidbody_set_bounce(int id, float restitution, float friction) {
     if (!jrb_ok(id)) return;

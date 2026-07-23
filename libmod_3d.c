@@ -269,6 +269,15 @@ int64_t g3d_entity_set_scale_bgd(INSTANCE *my, int64_t *params) {
     return g3d_entity_impl_set_scale(entity_id, sx, sy, sz);
 }
 
+int64_t g3d_entity_get_rotation_bgd(INSTANCE *my, int64_t *params) {
+    float p = 0, y = 0, r = 0;
+    int ok = g3d_entity_impl_get_rotation((int)params[0], &p, &y, &r);
+    if (params[1]) *(float *)params[1] = G3D_RAD2MD(p);
+    if (params[2]) *(float *)params[2] = G3D_RAD2MD(y);
+    if (params[3]) *(float *)params[3] = G3D_RAD2MD(r);
+    return ok;
+}
+
 int64_t g3d_entity_get_position_bgd(INSTANCE *my, int64_t *params) {
     int entity_id = (int)params[0];
     float *x = (float *)params[1];
@@ -2154,6 +2163,10 @@ int64_t g3d_char_set_water_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_char_update_bgd(INSTANCE *my, int64_t *params) {
     g3d_char_update((int)params[0], *(float *)&params[1]); return 1;
 }
+int64_t g3d_char_set_push_bgd(INSTANCE *my, int64_t *params) {
+    g3d_char_set_push((int)params[0], *(float *)&params[1]);
+    return 1;
+}
 int64_t g3d_char_set_position_bgd(INSTANCE *my, int64_t *params) {
     g3d_char_set_position((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
     return 1;
@@ -2235,6 +2248,23 @@ int64_t g3d_rigidbody_clear_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_c
 int64_t g3d_rigidbody_step_bgd(INSTANCE *my, int64_t *params) { g3d_rigidbody_step(*(float *)&params[0]); return 1; }
 int64_t g3d_rigidbody_apply_impulse_bgd(INSTANCE *my, int64_t *params) {
     g3d_rigidbody_apply_impulse((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_buoyancy_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_buoyancy((int)params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_upright_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_upright((int)params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_rigidbody_apply_angular_impulse_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_apply_angular_impulse((int)params[0], *(float *)&params[1],
+                                        *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_rigidbody_set_damping_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rigidbody_set_damping((int)params[0], *(float *)&params[1], *(float *)&params[2]);
     return 1;
 }
 int64_t g3d_rigidbody_set_velocity_bgd(INSTANCE *my, int64_t *params) {

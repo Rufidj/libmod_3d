@@ -68,6 +68,7 @@ int64_t g3d_entity_set_position_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_rotation_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_scale_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_get_position_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_entity_get_rotation_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_parent_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_material_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_alpha_bgd(INSTANCE *my, int64_t *params);
@@ -363,6 +364,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_ENTITY_SET_ROTATION", "IFFF", TYPE_INT, g3d_entity_set_rotation_bgd),
     FUNC("G3D_ENTITY_SET_SCALE", "IFFF", TYPE_INT, g3d_entity_set_scale_bgd),
     FUNC("G3D_ENTITY_GET_POSITION", "IPPP", TYPE_INT, g3d_entity_get_position_bgd),
+    FUNC("G3D_ENTITY_GET_ROTATION", "IPPP", TYPE_INT, g3d_entity_get_rotation_bgd),
     FUNC("G3D_ENTITY_SET_PARENT", "II", TYPE_INT, g3d_entity_set_parent_bgd),
     FUNC("G3D_CAMERA_CREATE", "", TYPE_INT, g3d_camera_create_bgd),
     FUNC("G3D_CAMERA_SET_ACTIVE", "I", TYPE_INT, g3d_camera_set_active_bgd),
@@ -448,6 +450,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CHAR_SET_WATER", "IIF", TYPE_INT, g3d_char_set_water_bgd),
     FUNC("G3D_CHAR_UPDATE", "IF", TYPE_INT, g3d_char_update_bgd),
     FUNC("G3D_CHAR_SET_POSITION", "IFFF", TYPE_INT, g3d_char_set_position_bgd),
+    FUNC("G3D_CHAR_SET_PUSH", "IF", TYPE_INT, g3d_char_set_push_bgd),
     FUNC("G3D_CHAR_SET_TUNING", "IFF", TYPE_INT, g3d_char_set_tuning_bgd),
     FUNC("G3D_CHAR_X", "I", TYPE_FLOAT, g3d_char_x_bgd),
     FUNC("G3D_CHAR_Y", "I", TYPE_FLOAT, g3d_char_y_bgd),
@@ -480,6 +483,10 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_RIGIDBODY_STEP", "F", TYPE_INT, g3d_rigidbody_step_bgd),
     FUNC("G3D_RIGIDBODY_APPLY_IMPULSE", "IFFF", TYPE_INT, g3d_rigidbody_apply_impulse_bgd),
     FUNC("G3D_RIGIDBODY_SET_VELOCITY", "IFFF", TYPE_INT, g3d_rigidbody_set_velocity_bgd),
+    FUNC("G3D_RIGIDBODY_SET_DAMPING", "IFF", TYPE_INT, g3d_rigidbody_set_damping_bgd),
+    FUNC("G3D_RIGIDBODY_APPLY_ANGULAR_IMPULSE", "IFFF", TYPE_INT, g3d_rigidbody_apply_angular_impulse_bgd),
+    FUNC("G3D_RIGIDBODY_SET_UPRIGHT", "IF", TYPE_INT, g3d_rigidbody_set_upright_bgd),
+    FUNC("G3D_RIGIDBODY_SET_BUOYANCY", "IFF", TYPE_INT, g3d_rigidbody_set_buoyancy_bgd),
     FUNC("G3D_RIGIDBODY_SET_BOUNCE", "IFF", TYPE_INT, g3d_rigidbody_set_bounce_bgd),
     FUNC("G3D_RIGIDBODY_X", "I", TYPE_FLOAT, g3d_rigidbody_x_bgd),
     FUNC("G3D_RIGIDBODY_Y", "I", TYPE_FLOAT, g3d_rigidbody_y_bgd),

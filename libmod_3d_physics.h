@@ -38,6 +38,10 @@ void g3d_char_update(int id, float dt);
 
 /* Teleport (also zeroes velocity). */
 void g3d_char_set_position(int id, float x, float y, float z);
+/* Fuerza maxima con la que el personaje empuja los cuerpos rigidos al andar
+   contra ellos (por defecto 200). Lo pesado apenas se movera. 0 = no los mueve,
+   pero siguen cortandole el paso. */
+void g3d_char_set_push(int id, float fuerza);
 
 /* State read-back (feet position). Eye height = feet + height. */
 float g3d_char_x(int id);
@@ -126,6 +130,18 @@ void g3d_rigidbody_step(float dt);                    /* advance the whole world
 
 void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz);
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz);
+/* Flotacion real, repartida por el volumen sumergido: el empuje se aplica en 8
+   puntos del cuerpo, no en el centro. Asi el par que endereza y la posibilidad de
+   volcar salen solos de la forma y de las fuerzas, sin nada impuesto.
+   rel_density es relativa al agua: <1 flota, 1 a flor, >1 se hunde. 0 = desactiva. */
+void g3d_rigidbody_set_buoyancy(int id, float water_y, float rel_density);
+/* Adrizamiento continuo: lleva el "arriba" del cuerpo hacia el del mundo. Es lo
+   que hace que lo que flota se enderece en vez de quedarse inclinado. 0 = nada. */
+void g3d_rigidbody_set_upright(int id, float strength);
+/* Impulso angular (gira sin desplazar): p.ej. enderezar lo que flota. */
+void g3d_rigidbody_apply_angular_impulse(int id, float ax, float ay, float az);
+/* Resistencia del medio: 0 = vacio (por defecto), ~2.5 = agua. -1 deja el valor. */
+void g3d_rigidbody_set_damping(int id, float lin, float ang);
 void g3d_rigidbody_set_bounce(int id, float restitution, float friction);
 
 float g3d_rigidbody_x(int id);
