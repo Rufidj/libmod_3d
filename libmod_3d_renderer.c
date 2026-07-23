@@ -330,6 +330,31 @@ void g3d_renderer_set_shadows(int enabled) {
     g_renderer.shadow_enabled = enabled;
 }
 
+/* Cambia la resolucion del shadow map direccional (y la de los focos, que va
+   ligada). El motor arranca en 1024 —barato pero se ven los dientes cuando la
+   sombra cubre mucho terreno—; subirlo a 2048/4096 las afina. La textura ya es de
+   almacenamiento mutable (se creo con glTexImage2D), asi que basta reasignarla al
+   nuevo tamano; el framebuffer sigue apuntando a la misma id. */
+void g3d_renderer_set_shadow_resolution(uint32_t resolution) {
+    if (resolution < 512) resolution = 512;
+    if (resolution > 8192) resolution = 8192;
+    if (resolution == g_renderer.shadow_map_width) return;
+    g_renderer.shadow_map_width = resolution;
+    g_renderer.shadow_map_height = resolution;
+#ifndef VITA
+    if (!g_renderer.initialized) return;
+    glBindTexture(GL_TEXTURE_2D, g_renderer.shadow_texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
+                 resolution, resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    for (int sc = 0; sc < 4; sc++) {
+        glBindTexture(GL_TEXTURE_2D, g_renderer.spot_shadow_texture[sc]);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
+                     resolution, resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    }
+    glBindTexture(GL_TEXTURE_2D, 0);
+#endif
+}
+
 void g3d_renderer_set_clear_color(float r, float g, float b, float a) {
     g_renderer.clear_color[0] = r;
     g_renderer.clear_color[1] = g;

@@ -1298,6 +1298,11 @@ int64_t g3d_set_shadows_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_set_shadow_resolution_bgd(INSTANCE *my, int64_t *params) {
+    g3d_renderer_set_shadow_resolution((uint32_t)params[0]);
+    return 1;
+}
+
 /* HDR post pipeline */
 int64_t g3d_set_hdr_bgd(INSTANCE *my, int64_t *params) {
     g3d_renderer_set_hdr((int)params[0]);

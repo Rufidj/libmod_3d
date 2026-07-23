@@ -177,6 +177,7 @@ void g3d_renderer_enable_shadows(int enabled, uint32_t resolution);
 
 /* Toggle shadow rendering without changing the shadow map resolution */
 void g3d_renderer_set_shadows(int enabled);
+void g3d_renderer_set_shadow_resolution(uint32_t resolution);
 
 /* Set clear color */
 void g3d_renderer_set_clear_color(float r, float g, float b, float a);
