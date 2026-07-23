@@ -35,20 +35,32 @@ Quat quat_from_euler(float pitch, float yaw, float roll) {
 }
 
 void quat_to_euler(Quat q, float *pitch, float *yaw, float *roll) {
-    /* Convert Quaternion back to Euler angles */
-    float sinr_cosp = 2 * (q.w * q.x + q.y * q.z);
-    float cosr_cosp = 1 - 2 * (q.x * q.x + q.y * q.y);
-    *roll = atan2f(sinr_cosp, cosr_cosp);
+    /* Inversa EXACTA de quat_from_euler, cuyo orden es Yaw(Y)*Pitch(X)*Roll(Z).
+       Antes esto usaba la convencion aeroespacial ZYX (yaw sobre Z), que NO es la
+       inversa de from_euler (yaw sobre Y): metias un yaw y al leerlo salia 0, y lo
+       que era yaw aparecia como pitch. Rompia get_rotation (camara FPS, enganche
+       de armas a un hueso) y el ida-y-vuelta de la rotacion de los cuerpos.
 
-    float sinp = 2 * (q.w * q.y - q.z * q.x);
-    if (fabsf(sinp) >= 1)
-        *pitch = copysignf(G3D_PI / 2, sinp);
-    else
-        *pitch = asinf(sinp);
+       De R = Ry(yaw)*Rx(pitch)*Rz(roll), sacando la matriz del cuaternion:
+         pitch = asin(-R12) = asin(2*(w*x - y*z))
+         yaw   = atan2(R02, R22) = atan2(2*(x*z + w*y), 1 - 2*(x*x + y*y))
+         roll  = atan2(R10, R11) = atan2(2*(x*y + w*z), 1 - 2*(x*x + z*z))  */
+    float sp = 2.0f * (q.w * q.x - q.y * q.z);
+    if (sp > 1.0f) sp = 1.0f; else if (sp < -1.0f) sp = -1.0f;
+    *pitch = asinf(sp);
 
-    float siny_cosp = 2 * (q.w * q.z + q.x * q.y);
-    float cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z);
-    *yaw = atan2f(siny_cosp, cosy_cosp);
+    if (fabsf(sp) > 0.99999f) {
+        /* Mirando casi recto arriba/abajo, yaw y roll se acoplan (gimbal): se fija
+           roll = 0 y todo el giro horizontal se lee como yaw. */
+        *yaw  = atan2f(-2.0f * (q.x * q.z - q.w * q.y),
+                        1.0f - 2.0f * (q.x * q.x + q.z * q.z));
+        *roll = 0.0f;
+    } else {
+        *yaw  = atan2f(2.0f * (q.x * q.z + q.w * q.y),
+                       1.0f - 2.0f * (q.x * q.x + q.y * q.y));
+        *roll = atan2f(2.0f * (q.x * q.y + q.w * q.z),
+                       1.0f - 2.0f * (q.x * q.x + q.z * q.z));
+    }
 }
 
 Quat quat_from_axis_angle(Vec3 axis, float angle) {
