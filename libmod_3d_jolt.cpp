@@ -146,11 +146,17 @@ static int jrb_add_dynamic(Shape *shape, float x, float y, float z, float mass,
                            float hx, float hy, float hz, float oy) {
     int s = jrb_slot();
     if (s < 0) return -1;
+    /* masa 0 = cuerpo FIJO: choca con todo pero no lo mueve nada. Es lo que hace
+       falta para el decorado solido (un barco, una roca, un cajon que no se
+       empuja) sin tener que ponerle un muro invisible a mano encima. Antes se
+       creaba dinamico igualmente y salia flotando a la deriva. */
+    bool fijo = (mass <= 0.0f);
     BodyCreationSettings bcs(shape, RVec3(x, y, z), Quat::sIdentity(),
-                             EMotionType::Dynamic, Layers::MOVING);
+                             fijo ? EMotionType::Static  : EMotionType::Dynamic,
+                             fijo ? Layers::NON_MOVING   : Layers::MOVING);
     bcs.mRestitution = 0.12f;
     bcs.mFriction    = 0.55f;
-    if (mass > 0.0f) {
+    if (!fijo) {
         bcs.mOverrideMassProperties = EOverrideMassProperties::CalculateInertia;
         bcs.mMassPropertiesOverride.mMass = mass;
     }
