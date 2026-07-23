@@ -126,6 +126,11 @@ void g3d_rigidbody_step(float dt);                    /* advance the whole world
 
 void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz);
 void g3d_rigidbody_set_velocity(int id, float vx, float vy, float vz);
+/* Flotacion real, repartida por el volumen sumergido: el empuje se aplica en 8
+   puntos del cuerpo, no en el centro. Asi el par que endereza y la posibilidad de
+   volcar salen solos de la forma y de las fuerzas, sin nada impuesto.
+   rel_density es relativa al agua: <1 flota, 1 a flor, >1 se hunde. 0 = desactiva. */
+void g3d_rigidbody_set_buoyancy(int id, float water_y, float rel_density);
 /* Adrizamiento continuo: lleva el "arriba" del cuerpo hacia el del mundo. Es lo
    que hace que lo que flota se enderece en vez de quedarse inclinado. 0 = nada. */
 void g3d_rigidbody_set_upright(int id, float strength);

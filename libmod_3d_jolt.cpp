@@ -77,7 +77,8 @@ static bool    g_inited   = false;
 static bool    g_terrain_added = false;
 static float   g_gravity  = 24.0f;
 
-struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; float upright; };
+struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; float upright;
+                float mass; float buoy_y, buoy_dens; };
 static JRBody g_rb[JRB_MAX];
 static int    g_mesh_count = 0;   /* # of static trimesh colliders (level geometry) */
 
@@ -156,7 +157,9 @@ static int jrb_add_dynamic(Shape *shape, float x, float y, float z, float mass,
     BodyID bid = g_ps->GetBodyInterface().CreateAndAddBody(bcs, EActivation::Activate);
     g_rb[s].id = bid; g_rb[s].hx = hx; g_rb[s].hy = hy; g_rb[s].hz = hz;
     g_rb[s].ox = 0.0f; g_rb[s].oy = oy; g_rb[s].oz = 0.0f;
-    g_rb[s].upright = 0.0f; g_rb[s].active = 1;
+    g_rb[s].upright = 0.0f; g_rb[s].mass = mass > 0.0f ? mass : 1.0f;
+    g_rb[s].buoy_dens = 0.0f; g_rb[s].buoy_y = 0.0f;
+    g_rb[s].active = 1;
     return s;
 }
 
@@ -263,7 +266,8 @@ int g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, f
     if (s < 0) return -1;
     g_rb[s].id = bid; g_rb[s].hx = g_rb[s].hy = g_rb[s].hz = 0.0f;
     g_rb[s].ox = g_rb[s].oy = g_rb[s].oz = 0.0f;
-    g_rb[s].upright = 0.0f; g_rb[s].active = 1;
+    g_rb[s].upright = 0.0f; g_rb[s].mass = 1.0f;
+    g_rb[s].buoy_dens = 0.0f; g_rb[s].buoy_y = 0.0f; g_rb[s].active = 1;
     g_mesh_count++;
     return s;
 }
@@ -286,10 +290,66 @@ static void jolt_apply_upright(float dt) {
     for (int i = 0; i < JRB_MAX; i++) {
         if (!g_rb[i].active || g_rb[i].upright <= 0.0f) continue;
         Vec3 up = bi.GetRotation(g_rb[i].id) * Vec3(0, 1, 0);
-        Vec3 tor = up.Cross(Vec3(0, 1, 0));            /* 0 si ya esta derecho */
+        Vec3 tor = up.Cross(Vec3(0, 1, 0));            /* (-up.z, 0, up.x); 0 si ya esta derecho */
         if (tor.LengthSq() < 1.0e-8f) continue;
         bi.ActivateBody(g_rb[i].id);
         bi.AddAngularImpulse(g_rb[i].id, tor * (g_rb[i].upright * dt));
+    }
+}
+/* Flotacion REAL: el empuje no se aplica en el centro, se reparte por el volumen
+   sumergido. El cuerpo se divide en 8 celdas y cada una empuja segun lo hundida
+   que este, en su propia posicion. De ahi salen solos el par que endereza y la
+   estabilidad: uno ancho y bajo aguanta, uno alto y estrecho vuelca, y un
+   empujon suficientemente fuerte tumba a cualquiera. Nada de esto esta escrito
+   en ninguna parte, es consecuencia de donde empuja el agua.
+
+   densidad es relativa al agua: <1 flota, 1 queda a flor, >1 se hunde. */
+void g3d_rigidbody_set_buoyancy(int id, float water_y, float rel_density) {
+    if (!jrb_ok(id)) return;
+    g_rb[id].buoy_y = water_y;
+    g_rb[id].buoy_dens = rel_density > 0.0f ? rel_density : 0.0f;
+}
+static void jolt_apply_buoyancy(float dt) {
+    const int N = 4;                    /* 4x4x4 = 64 celdas */
+    const float inv = 1.0f / (float)(N*N*N);
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    for (int i = 0; i < JRB_MAX; i++) {
+        JRBody &b = g_rb[i];
+        if (!b.active || b.buoy_dens <= 0.0f) continue;
+        float hx = b.hx > 0.01f ? b.hx : 0.5f;
+        float hy = b.hy > 0.01f ? b.hy : 0.5f;
+        float hz = b.hz > 0.01f ? b.hz : 0.5f;
+        RVec3 pos = bi.GetPosition(b.id);
+        Quat  rot = bi.GetRotation(b.id);
+        /* Empuje a inmersion total = peso / densidad relativa: con densidad 0.5 el
+           cuerpo aguanta el doble de su peso, o sea flota a media agua. */
+        float cellF = b.mass * g_gravity / b.buoy_dens * inv;
+        float ramp  = 2.0f * hy / (float)N;         /* altura de una celda */
+        /* Se acumulan fuerza y par y se aplican de una vez: es lo mismo que 64
+           impulsos en 64 puntos, pero sin 64 bloqueos del cuerpo. */
+        float Fy = 0.0f; float Tx = 0.0f, Tz = 0.0f;
+        for (int ix = 0; ix < N; ix++)
+        for (int iy = 0; iy < N; iy++)
+        for (int iz = 0; iz < N; iz++) {
+            /* centro de la celda en coordenadas del cuerpo */
+            Vec3 loc(hx * (2.0f*(ix+0.5f)/N - 1.0f),
+                     hy * (2.0f*(iy+0.5f)/N - 1.0f),
+                     hz * (2.0f*(iz+0.5f)/N - 1.0f));
+            Vec3 r = rot * loc;                     /* brazo respecto al centro */
+            float f = (b.buoy_y - (pos.GetY() + r.GetY())) / ramp + 0.5f;
+            if (f <= 0.0f) continue; if (f > 1.0f) f = 1.0f;
+            float J = cellF * f * dt;
+            Fy += J;
+            /* par = r x (0,J,0) = (-r.z*J, 0, +r.x*J) */
+            Tx -= r.GetZ() * J;
+            Tz += r.GetX() * J;
+        }
+        if (Fy <= 0.0f) continue;                   /* fuera del agua */
+        /* Si el empuje supera al peso el cuerpo deberia subir: hay que despertarlo,
+           porque dormido ignoraria los impulsos y se quedaria hundido. */
+        if (Fy > b.mass * g_gravity * dt) bi.ActivateBody(b.id);
+        bi.AddImpulse(b.id, Vec3(0.0f, Fy, 0.0f));
+        bi.AddAngularImpulse(b.id, Vec3(Tx, 0.0f, Tz));
     }
 }
 void g3d_rigidbody_set_upright(int id, float strength) {
@@ -301,6 +361,7 @@ void g3d_rigidbody_step(float dt) {
     jolt_add_terrain();
     if (dt <= 0.0f) return; if (dt > 0.05f) dt = 0.05f;
     jolt_apply_upright(dt);
+    jolt_apply_buoyancy(dt);
     g_ps->Update(dt, 1, g_temp, g_job);
 }
 

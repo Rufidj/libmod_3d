@@ -485,6 +485,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_RIGIDBODY_SET_DAMPING", "IFF", TYPE_INT, g3d_rigidbody_set_damping_bgd),
     FUNC("G3D_RIGIDBODY_APPLY_ANGULAR_IMPULSE", "IFFF", TYPE_INT, g3d_rigidbody_apply_angular_impulse_bgd),
     FUNC("G3D_RIGIDBODY_SET_UPRIGHT", "IF", TYPE_INT, g3d_rigidbody_set_upright_bgd),
+    FUNC("G3D_RIGIDBODY_SET_BUOYANCY", "IFF", TYPE_INT, g3d_rigidbody_set_buoyancy_bgd),
     FUNC("G3D_RIGIDBODY_SET_BOUNCE", "IFF", TYPE_INT, g3d_rigidbody_set_bounce_bgd),
     FUNC("G3D_RIGIDBODY_X", "I", TYPE_FLOAT, g3d_rigidbody_x_bgd),
     FUNC("G3D_RIGIDBODY_Y", "I", TYPE_FLOAT, g3d_rigidbody_y_bgd),

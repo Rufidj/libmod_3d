@@ -495,6 +495,7 @@ typedef struct {
     float inv_inertia;       /* scalar inverse inertia (box approximation)     */
     float lin_damp, ang_damp;/* resistencia del medio (0 = vacio, agua ~2.5)   */
     float upright;           /* fuerza de adrizamiento (0 = no se endereza)   */
+    float buoy_y, buoy_dens; /* flotacion repartida (0 = no flota)            */
     float ox, oy, oz;        /* body-centre -> model-origin offset (render)    */
     int   grounded;
     int   active;
@@ -532,6 +533,36 @@ void g3d_rigidbody_apply_impulse(int id, float ix, float iy, float iz) {
     G3DBody *b = &g_bodies[id];
     b->vx += ix * b->inv_mass; b->vy += iy * b->inv_mass; b->vz += iz * b->inv_mass;
     if (iy > 0.0f) b->grounded = 0;
+}
+/* Flotacion repartida por el volumen sumergido (8 celdas), igual que en Jolt: el
+   par que endereza y el vuelco salen solos de donde empuja el agua. */
+void g3d_rigidbody_set_buoyancy(int id, float water_y, float rel_density) {
+    if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
+    g_bodies[id].buoy_y = water_y;
+    g_bodies[id].buoy_dens = rel_density > 0.0f ? rel_density : 0.0f;
+}
+static void apply_buoyancy(float dt) {
+    for (int i = 0; i < MAX_BODIES; i++) {
+        G3DBody *b = &g_bodies[i];
+        if (!b->active || b->buoy_dens <= 0.0f || b->inv_mass <= 0.0f) continue;
+        float mass = 1.0f / b->inv_mass;
+        float full = mass * g_gravity / b->buoy_dens;
+        float cell = full * 0.125f;
+        for (int sx = -1; sx <= 1; sx += 2)
+        for (int sy = -1; sy <= 1; sy += 2)
+        for (int sz = -1; sz <= 1; sz += 2) {
+            Vec3 r = quat_rotate_vec3(b->orient,
+                        vec3_make(sx*b->hx*0.5f, sy*b->hy*0.5f, sz*b->hz*0.5f));
+            float wy = b->py + r.y;
+            float f = (b->buoy_y - wy) / b->hy + 0.5f;
+            if (f <= 0.0f) continue; if (f > 1.0f) f = 1.0f;
+            float J = cell * f * dt;                 /* impulso vertical */
+            b->vy += J * b->inv_mass;
+            /* par = r x J, con J = (0,J,0)  ->  (-r.z*J, 0, +r.x*J) */
+            b->avx += (-r.z * J) * b->inv_inertia;
+            b->avz += ( r.x * J) * b->inv_inertia;
+        }
+    }
 }
 void g3d_rigidbody_set_upright(int id, float strength) {
     if (id<0 || id>=MAX_BODIES || !g_bodies[id].active) return;
@@ -639,6 +670,8 @@ static void response_axis(G3DBody *a, int axis, float rest, float fric) {
 void g3d_rigidbody_step(float dt) {
     if (dt <= 0.0f) return; if (dt > 0.05f) dt = 0.05f;
 
+    apply_buoyancy(dt);
+
     /* integrate position + orientation (free tumble) */
     for (int i = 0; i < MAX_BODIES; i++) {
         G3DBody *b = &g_bodies[i];
@@ -648,9 +681,9 @@ void g3d_rigidbody_step(float dt) {
            magnitud salen a la vez y vale para cualquier orientacion. */
         if (b->upright > 0.0f) {
             Vec3 up = quat_rotate_vec3(b->orient, vec3_make(0.0f, 1.0f, 0.0f));
-            /* cross(up, (0,1,0)) = (up.z, 0, -up.x) */
+            /* cross(up, (0,1,0)) = (-up.z, 0, up.x) */
             float k = b->upright * b->inv_inertia * dt;
-            b->avx += up.z * k; b->avz += -up.x * k;
+            b->avx += -up.z * k; b->avz += up.x * k;
         }
         /* Resistencia del medio. En el aire es 0 y no cambia nada; en el agua
            frena, que es lo que impide que un cuerpo que flota conserve su
