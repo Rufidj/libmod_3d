@@ -19,6 +19,8 @@ extern int   g3d_jolt_mesh_count(void);
 extern float g3d_jolt_ground_below(float x, float z, float y_top, float y_min);
 extern int   g3d_jolt_slide_capsule(float *x, float *z, float feet,
                                      float radius, float height, float step);
+extern void  g3d_jolt_char_push(float *px, float py, float *pz, float radius, float height,
+                                float cvx, float cvz, float fuerza, float dt);
 #endif
 
 typedef struct {
@@ -33,6 +35,7 @@ typedef struct {
     int   in_water;          /* 1 = swimming (buoyancy instead of gravity)      */
     float water_y;           /* world Y of the water surface while in_water     */
     float swim_up;           /* extra upward stroke this frame (from jump key)  */
+    float push;              /* fuerza maxima al empujar cuerpos rigidos (N)   */
 } G3DChar;
 
 typedef struct { float mn[3], mx[3]; int active; } G3DBox;
@@ -53,6 +56,7 @@ int g3d_char_create(float x, float y, float z, float radius, float height) {
         c->height = height > 0.2f ? height : 1.8f;
         c->step = 0.5f;
         c->slope_cos = cosf(48.0f * 3.14159265f / 180.0f);
+        c->push = 200.0f;        /* aparta barriles ligeros; los pesados le frenan */
         c->active = 1;
         return i;
     }
@@ -87,6 +91,13 @@ void g3d_char_set_water(int id, int in_water, float surface_y) {
     g_chars[id].water_y = surface_y;
 }
 
+/* Fuerza maxima con la que el personaje empuja los cuerpos rigidos. Cuanto mas
+   pesado sea el cuerpo menos se movera, y siempre le corta el paso a el.
+   0 = no mueve nada (pero sigue chocando). */
+void g3d_char_set_push(int id, float fuerza) {
+    if (id < 0 || id >= MAX_CHARS || !g_chars[id].active) return;
+    g_chars[id].push = fuerza >= 0.0f ? fuerza : 0.0f;
+}
 void g3d_char_set_position(int id, float x, float y, float z) {
     if (id < 0 || id >= MAX_CHARS || !g_chars[id].active) return;
     G3DChar *c = &g_chars[id];
@@ -356,6 +367,11 @@ void g3d_char_update(int id, float dt) {
             if (g_boxes[i].active) resolve_xz(&g_boxes[i], &nxp, &nzp, c->radius, y0, y1);
         }
         c->px = nxp; c->pz = nzp;
+#ifdef USE_JOLT
+        if (1)                                       /* choca; y empuja si push>0 */
+            g3d_jolt_char_push(&c->px, c->py, &c->pz, c->radius, c->height,
+                               c->vx, c->vz, c->push, dt);
+#endif
 
         /* vertical, but never below the pool floor */
         float ny_new = c->py + c->vy * dt;
@@ -423,6 +439,11 @@ void g3d_char_update(int id, float dt) {
     }
 #endif
     c->px = nxp; c->pz = nzp;
+#ifdef USE_JOLT
+    if (1)                                           /* choca; y empuja si push>0 */
+        g3d_jolt_char_push(&c->px, c->py, &c->pz, c->radius, c->height,
+                           c->vx, c->vz, c->push, dt);
+#endif
 
     /* --- vertical integrate + ground/ceiling --- */
     float ground = ground_under(c->px, c->pz, c->radius, c->py, c->step);

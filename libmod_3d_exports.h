@@ -450,6 +450,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CHAR_SET_WATER", "IIF", TYPE_INT, g3d_char_set_water_bgd),
     FUNC("G3D_CHAR_UPDATE", "IF", TYPE_INT, g3d_char_update_bgd),
     FUNC("G3D_CHAR_SET_POSITION", "IFFF", TYPE_INT, g3d_char_set_position_bgd),
+    FUNC("G3D_CHAR_SET_PUSH", "IF", TYPE_INT, g3d_char_set_push_bgd),
     FUNC("G3D_CHAR_SET_TUNING", "IFF", TYPE_INT, g3d_char_set_tuning_bgd),
     FUNC("G3D_CHAR_X", "I", TYPE_FLOAT, g3d_char_x_bgd),
     FUNC("G3D_CHAR_Y", "I", TYPE_FLOAT, g3d_char_y_bgd),

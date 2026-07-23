@@ -38,6 +38,10 @@ void g3d_char_update(int id, float dt);
 
 /* Teleport (also zeroes velocity). */
 void g3d_char_set_position(int id, float x, float y, float z);
+/* Fuerza maxima con la que el personaje empuja los cuerpos rigidos al andar
+   contra ellos (por defecto 200). Lo pesado apenas se movera. 0 = no los mueve,
+   pero siguen cortandole el paso. */
+void g3d_char_set_push(int id, float fuerza);
 
 /* State read-back (feet position). Eye height = feet + height. */
 float g3d_char_x(int id);

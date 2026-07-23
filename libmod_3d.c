@@ -2132,6 +2132,10 @@ int64_t g3d_char_set_water_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_char_update_bgd(INSTANCE *my, int64_t *params) {
     g3d_char_update((int)params[0], *(float *)&params[1]); return 1;
 }
+int64_t g3d_char_set_push_bgd(INSTANCE *my, int64_t *params) {
+    g3d_char_set_push((int)params[0], *(float *)&params[1]);
+    return 1;
+}
 int64_t g3d_char_set_position_bgd(INSTANCE *my, int64_t *params) {
     g3d_char_set_position((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]);
     return 1;

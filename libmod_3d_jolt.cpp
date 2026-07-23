@@ -352,6 +352,53 @@ static void jolt_apply_buoyancy(float dt) {
         bi.AddAngularImpulse(b.id, Vec3(Tx, 0.0f, Tz));
     }
 }
+/* El personaje empuja los cuerpos. No es un cuerpo de Jolt (es un controlador
+   propio con su deslizamiento en pendiente, su ground snap y su modo nado), asi
+   que el contacto no sale solo: se busca que cuerpos toca la capsula y se les
+   iguala la velocidad hacia donde empuja, sin pasarse. Asi un barril flotando se
+   deja empujar y uno pesado apenas se mueve, que es lo que uno espera. */
+void g3d_jolt_char_push(float *px, float py, float *pz, float radius, float height,
+                        float cvx, float cvz, float fuerza, float dt) {
+    if (!g_inited || !g_ps || dt <= 0.0f) return;
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    for (int i = 0; i < JRB_MAX; i++) {
+        JRBody &b = g_rb[i];
+        if (!b.active) continue;
+        RVec3 bp = bi.GetPosition(b.id);
+        float dx = (float)bp.GetX() - *px, dz = (float)bp.GetZ() - *pz;
+        float br = b.hx > b.hz ? b.hx : b.hz;
+        float reach = radius + br;
+        float d2 = dx*dx + dz*dz;
+        if (d2 > reach*reach) continue;
+        float by = (float)bp.GetY();
+        if (by + b.hy < py || by - b.hy > py + height) continue;   /* no se solapan en altura */
+        float d = sqrtf(d2);
+        float nx, nz;
+        if (d < 1.0e-4f) { nx = 1.0f; nz = 0.0f; d = 0.0f; }       /* justo encima: aparta a un lado */
+        else             { nx = dx/d; nz = dz/d; }
+
+        /* El cuerpo frena al personaje: sin esto lo atravesaba y el empujon duraba
+           dos frames. Se saca al personaje del solape, y por eso el cuerpo va
+           delante mientras siga andando contra el. */
+        float dentro = reach - d;
+        if (dentro > 0.0f) { *px -= nx * dentro; *pz -= nz * dentro; }
+
+        float hacia = cvx*nx + cvz*nz;              /* velocidad del personaje hacia el cuerpo */
+        if (hacia <= 0.0f) continue;                /* se aleja: no empuja */
+        Vec3 v = bi.GetLinearVelocity(b.id);
+        float vn = v.GetX()*nx + v.GetZ()*nz;
+        if (vn >= hacia) continue;                  /* ya va mas rapido que el empuje */
+        /* La masa tiene que importar: el personaje solo puede hacer una fuerza,
+           no igualar velocidades. Sin este tope, un barril de 50 kg salia
+           disparado igual que uno de 1 kg. Lo pesado apenas se mueve y encima le
+           corta el paso, porque de el si que lo aparta siempre. */
+        float J = (hacia - vn) * b.mass;            /* el que haria falta */
+        float Jmax = fuerza * dt;                   /* el que puede hacer */
+        if (J > Jmax) J = Jmax;
+        bi.ActivateBody(b.id);
+        bi.AddImpulse(b.id, Vec3(nx*J, 0.0f, nz*J));
+    }
+}
 void g3d_rigidbody_set_upright(int id, float strength) {
     if (!jrb_ok(id)) return;
     g_rb[id].upright = strength > 0.0f ? strength : 0.0f;
