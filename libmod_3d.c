@@ -2307,7 +2307,12 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
     int64_t csubtype = LOCQWORD( libmod_3d, i, LOC3D_CSUBTYPE );
     int entity_id = (int) LOCQWORD( libmod_3d, i, LOC3D_ENTITY );
 
-    if ( !entity_id ) return;
+    /* La local 'entity' vale -1 mientras el proceso no ata ninguna entidad. Ojo:
+       NO se puede usar 0 como "sin atar", porque las camaras, luces y entidades
+       empiezan a numerar en 0, y la PRIMERA de cada tipo tiene id 0 legitimo. Con
+       el 0 como centinela, esa primera camara/luz no se dibujaba (pantalla negra
+       con la camara como proceso). */
+    if ( entity_id < 0 ) return;
 
     /* World-space position from standard x/y/z BGD locals */
     float px = (float) LOCDOUBLE( libmod_3d, i, LOC3D_COORDX );
