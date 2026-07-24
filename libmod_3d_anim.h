@@ -25,6 +25,9 @@ int g3d_model_bounds(G3DModel *model, float *out_min, float *out_max);
 
 /* Find a node/bone by case-insensitive substring of its name (-1 if none). */
 int g3d_model_node_find(G3DModel *model, const char *name);
+/* Lista de huesos/nodos, para que el editor pueda mostrarlos. */
+int g3d_model_node_count(G3DModel *model);
+const char *g3d_model_node_name(G3DModel *model, int i);
 
 /* Animated model-space translation component (0=x,1=y,2=z) of a node/bone. */
 float g3d_model_node_axis(G3DModel *model, int node, int comp);

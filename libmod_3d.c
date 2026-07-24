@@ -1185,7 +1185,11 @@ int64_t g3d_material_set_roughness_bgd(INSTANCE *my, int64_t *params) {
     return g3d_material_impl_set_roughness(material_id, value);
 }
 
-/* Physics stubs */
+/* OBSOLETAS: una API de fisica antigua que quedo como stubs (no hacen nada). La
+   fisica de verdad es G3D_RIGIDBODY_*: crear -> G3D_RIGIDBODY_CREATE[_SPHERE/...],
+   velocidad -> G3D_RIGIDBODY_SET_VELOCITY, avanzar el mundo -> G3D_RIGIDBODY_STEP.
+   Se mantienen exportadas para no romper programas viejos que las nombren, pero no
+   deberian usarse. (Borrado real: cuando se cierre la fusion con BennuGD2.) */
 int64_t g3d_physics_body_create_bgd(INSTANCE *my, int64_t *params) { return -1; }
 int64_t g3d_physics_body_set_velocity_bgd(INSTANCE *my, int64_t *params) { return 1; }
 int64_t g3d_physics_step_bgd(INSTANCE *my, int64_t *params) { return 1; }
@@ -2106,9 +2110,18 @@ int64_t g3d_light_enable_shadow_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_light_set_shadow_quality_bgd(INSTANCE *my, int64_t *params) {
     int light_id = (int)params[0];
     int resolution = (int)params[1];
-    return g3d_light_impl_set_shadow_quality(light_id, resolution);
+    /* La resolucion por-luz que guardaba esto NO la mira la pasada de sombra
+       direccional (usa la del renderer). Era un mando muerto: subias la calidad y
+       no cambiaba nada. Ahora ademas ajusta la del renderer, que es la que manda.
+       Para el caso normal (una luz de sol) hace lo que uno espera.
+       [equivale a G3D_SET_SHADOW_RESOLUTION] */
+    g3d_light_impl_set_shadow_quality(light_id, resolution);   /* se conserva por compatibilidad */
+    g3d_renderer_set_shadow_resolution((uint32_t)resolution);
+    return 1;
 }
 
+/* OBSOLETA: no hacia nada (stub). La proyeccion de la camara se controla con
+   G3D_CAMERA_SET_FOV. Se mantiene para no romper programas que la llamen. */
 int64_t g3d_camera_set_projection_bgd(INSTANCE *my, int64_t *params) { return 1; }
 int64_t g3d_camera_set_fov_bgd(INSTANCE *my, int64_t *params) {
     G3DCamera *cam = g3d_bgd_camera_get((int)params[0]);

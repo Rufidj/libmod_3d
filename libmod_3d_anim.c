@@ -34,6 +34,17 @@ const char *g3d_model_animation_name(G3DModel *model, int i) {
     return model->animations[i].name;
 }
 
+/* Numero de nodos/huesos y su nombre. Para que el editor pueda MOSTRAR la lista
+   de huesos de un modelo, en vez de que el usuario tenga que adivinar el nombre
+   al enganchar un arma. */
+int g3d_model_node_count(G3DModel *model) {
+    return model ? model->node_count : 0;
+}
+const char *g3d_model_node_name(G3DModel *model, int i) {
+    if (!model || !model->node_name || i < 0 || i >= model->node_count) return "";
+    return model->node_name[i] ? model->node_name[i] : "";
+}
+
 /* Find a node/bone by case-insensitive substring of its name (-1 if none).
    Same match as the BennuGD2 G3D_MODEL_NODE_FIND, exposed for the editor's
    live preview (weapon-in-hand) so it doesn't need the bgd layer. */
