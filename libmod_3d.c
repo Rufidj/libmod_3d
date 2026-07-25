@@ -1502,6 +1502,11 @@ int64_t g3d_water_set_texture_bgd(INSTANCE *my, int64_t *params) {
     g3d_water_set_texture(tex ? tex->gl_handle : 0);
     return 1;
 }
+int64_t g3d_fluid_set_texture_bgd(INSTANCE *my, int64_t *params) {
+    G3DTexture *tex = (G3DTexture *)(intptr_t)params[0];
+    g3d_fluid_set_texture(tex ? tex->gl_handle : 0);
+    return 1;
+}
 
 int64_t g3d_water_set_reflection_bgd(INSTANCE *my, int64_t *params) {
     int enable = (int)params[0];

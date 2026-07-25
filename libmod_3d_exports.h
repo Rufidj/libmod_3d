@@ -194,6 +194,7 @@ int64_t g3d_water_set_waves_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_color_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_enabled_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_texture_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_fluid_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_reflection_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_reflection_flip_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_ripple_bgd(INSTANCE *my, int64_t *params);
@@ -549,6 +550,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_WATER_SET_COLOR", "FFFFFF", TYPE_INT, g3d_water_set_color_bgd),
     FUNC("G3D_WATER_SET_ENABLED", "I", TYPE_INT, g3d_water_set_enabled_bgd),
     FUNC("G3D_WATER_SET_TEXTURE", "I", TYPE_INT, g3d_water_set_texture_bgd),
+    FUNC("G3D_FLUID_SET_TEXTURE", "I", TYPE_INT, g3d_fluid_set_texture_bgd),
     FUNC("G3D_WATER_SET_REFLECTION", "IF", TYPE_INT, g3d_water_set_reflection_bgd),
     FUNC("G3D_WATER_SET_REFLECTION_FLIP", "I", TYPE_INT, g3d_water_set_reflection_flip_bgd),
     FUNC("G3D_WATER_RIPPLE", "FFF", TYPE_INT, g3d_water_ripple_bgd),

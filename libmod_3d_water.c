@@ -837,6 +837,9 @@ float g3d_water_level_at(float x, float z) {
     return best;
 }
 
+/* Textura de la superficie de los fluidos (lagos/rios). 0 = ninguna. */
+void g3d_fluid_set_texture(unsigned int gl_handle) { g_fluid.tex = gl_handle; }
+
 int g3d_fluid_add(float cx, float cz, float size_x, float size_z,
                   float level, float depth) {
     if (g_fluid.count >= MAX_FLUIDS) return -1;
