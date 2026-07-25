@@ -551,7 +551,9 @@ int g3d_river_add(const float *pts_xyz, int n, float width) {
     float depth = 1.0f;
     G3DMesh *rm = g3d_fluid_build_river(pts_xyz, n, H, side, ws, width, &depth);
     if (rm) g3d_fluid_add_mesh(rm, depth);              /* superficie del cauce   */
-    g3d_flow_add_path(pts_xyz, n, width, 0.05f, 1.0f, 1.0f);  /* flujo animado    */
+    /* La capa de flujo (g3d_flow_add_path) se veia como una cinta gris
+       geometrica sobre la hierba. El rio se dibuja con la superficie de
+       fluido (agua de verdad, como los lagos) dentro del lecho excavado. */
     g3d_river_add_waterfalls(pts_xyz, n, H, side, ws, width); /* cascadas         */
     return rm ? 0 : -1;
 }
@@ -560,17 +562,19 @@ int g3d_river_add(const float *pts_xyz, int n, float width) {
 static float g_river_pts[G3D_RIVER_MAXPTS * 3];
 static int   g_river_n = 0;
 static float g_river_w = 3.0f;
+static float g_river_rise = 0.0f;   /* cuanto sube el agua sobre el lecho */
 
-int g3d_river_begin(float width) {
+int g3d_river_begin(float width, float rise) {
     g_river_n = 0;
     g_river_w = (width > 0.1f) ? width : 3.0f;
+    g_river_rise = rise;
     return 1;
 }
 int g3d_river_point(float x, float z) {
     if (g_river_n >= G3D_RIVER_MAXPTS) return 0;
     const float *H = NULL; int side = 0; float ws = 0.0f; float y = 0.0f;
     if (g3d_scene_heightfield(&H, &side, &ws) && side >= 2)
-        y = g3d_heightfield_height(H, side, ws, x, z);   /* pega el punto al terreno */
+        y = g3d_heightfield_height(H, side, ws, x, z) + g_river_rise;   /* lecho + elevacion */
     g_river_pts[g_river_n * 3 + 0] = x;
     g_river_pts[g_river_n * 3 + 1] = y;
     g_river_pts[g_river_n * 3 + 2] = z;

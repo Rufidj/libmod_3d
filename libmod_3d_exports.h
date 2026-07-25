@@ -542,7 +542,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_WATER_LEVEL_AT", "FF", TYPE_FLOAT, g3d_water_level_at_bgd),
     FUNC("G3D_LAKE_ADD", "FFFF", TYPE_INT, g3d_lake_add_bgd),
     FUNC("G3D_LAKE_SPILL_LEVEL", "FF", TYPE_FLOAT, g3d_lake_spill_level_bgd),
-    FUNC("G3D_RIVER_BEGIN", "F", TYPE_INT, g3d_river_begin_bgd),
+    FUNC("G3D_RIVER_BEGIN", "FF", TYPE_INT, g3d_river_begin_bgd),
     FUNC("G3D_RIVER_POINT", "FF", TYPE_INT, g3d_river_point_bgd),
     FUNC("G3D_RIVER_END", "", TYPE_INT, g3d_river_end_bgd),
     FUNC("G3D_WATER_SET_WAVES", "FFF", TYPE_INT, g3d_water_set_waves_bgd),
