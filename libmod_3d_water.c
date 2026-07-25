@@ -140,6 +140,7 @@ static const char *water_frag =
     "in float vAlong;\n"
     "in float vLavaHot;\n"
     "uniform int uShoreFoam;\n"        /* 1 = use vShoreDepth for shoreline foam */
+    "uniform float uEdgeFade;\n"       /* distancia (en profundidad de orilla) para difuminar el borde */
     "uniform int uSurf;\n"             /* 1 = breaking surf lines rolling onto the shore */
     "uniform float uSurfFreq;\n"       /* surf line spacing (in shore-depth units) */
     "uniform float uSurfSpeed;\n"      /* how fast the surf rolls in */
@@ -259,7 +260,7 @@ static const char *water_frag =
     "    vec2 suv = vClip.xy / vClip.w * 0.5 + 0.5;\n"
     // refraction: sample the scene behind the water, distorted by the surface
     // normal; near the shore (shallow) don't distort so the edge stays soft.
-    "    float shore = (uShoreFoam == 1) ? smoothstep(0.0, 1.2, vShoreDepth) : 1.0;\n"
+    "    float shore = (uShoreFoam == 1) ? smoothstep(0.0, max(uEdgeFade, 0.001), vShoreDepth) : 1.0;\n"
     "    vec3 refr = base;\n"
     "    if (uHasScene == 1) {\n"
     "        vec2 ruv = clamp(suv + N.xz * uRefract * shore, 0.002, 0.998);\n"
@@ -910,8 +911,28 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
 #ifndef VITA
     /* unit_mesh is only needed by rectangle zones; lake zones carry their own
        mesh, so don't gate the whole pass on it. */
-    if (g_fluid.count == 0 || !g_water.shader || !camera)
+    if (g_fluid.count == 0 || !camera)
         return;
+    if (!g_water.shader) {
+        g_water.shader = g3d_shader_create(water_vert, water_frag);
+        if (!g_water.shader) return;
+    }
+
+    /* Misma TESELACION que el mar/sim: olas geometricas de verdad, no un plano
+       plano. Se detecta GL4 una vez y se compila el programa con teselacion; si
+       no hay, cae al shader plano de forma segura. */
+    if (!g_water.tess_checked) {
+        GLint major = 0; glGetIntegerv(GL_MAJOR_VERSION, &major);
+        g_water.tess_avail = (major >= 4) ? 1 : 0;
+        if (!g_water.tess_init) g_water.tess = 1;
+        g_water.tess_checked = 1;
+    }
+    int use_tess = (g_water.tess && g_water.tess_avail && g_fluid.kind != 1);   /* lava = plano */
+    if (use_tess && !g_water.tess_shader) {
+        g_water.tess_shader = g3d_shader_create_tess(water_tvert, water_tcs, water_tes, water_frag);
+        if (!g_water.tess_shader) { g_water.tess_avail = 0; use_tess = 0; }
+    }
+    G3DShaderProgram *sh = (G3DShaderProgram *)(use_tess ? g_water.tess_shader : g_water.shader);
 
     Mat4 view = g3d_camera_get_view(camera);
     Mat4 proj = g3d_camera_get_projection(camera);
@@ -921,42 +942,60 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
     }
     float t = (float)SDL_GetTicks() / 1000.0f;
 
-    g3d_shader_use(g_water.shader);
-    g3d_shader_set_mat4(g_water.shader, "uView", view);
-    g3d_shader_set_mat4(g_water.shader, "uProjection", proj);
-    g3d_shader_set_float(g_water.shader, "uTime", t);
-    g3d_shader_set_float(g_water.shader, "uWaveAmp", g_fluid.amp);
-    g3d_shader_set_float(g_water.shader, "uWaveLen", g_fluid.len);
-    g3d_shader_set_float(g_water.shader, "uWaveSpeed", g_fluid.speed);
-    g3d_shader_set_vec3(g_water.shader, "uCameraPos", camera->position);
+    g3d_shader_use(sh);
+    g3d_shader_set_mat4(sh, "uView", view);
+    g3d_shader_set_mat4(sh, "uProjection", proj);
+    g3d_shader_set_float(sh, "uTime", t);
+    g3d_shader_set_vec3(sh, "uCameraPos", camera->position);
+    g3d_shader_set_float(sh, "uTessMax", 12.0f);
+    g3d_shader_set_float(sh, "uLava", g_fluid.kind == 1 ? 1.0f : 0.0f);
+    g3d_shader_set_int(sh, "uHasRefl", 0);
+    /* borde ancho: el lago se disuelve poco a poco en el agua/tierra que tiene
+       debajo, para que al mezclarse con otro lago/mar no se note la costura. */
+    g3d_shader_set_float(sh, "uEdgeFade", 3.5f);
+    /* olas de superficie tipo lago: sin oleaje direccional de mar, oleaje suave */
+    g3d_shader_set_float(sh, "uSwellAmp", 0.0f);
+    g3d_shader_set_int(sh, "uSurf", 0);
+    g3d_shader_set_float(sh, "uSurfFreq", 0.35f);
+    g3d_shader_set_float(sh, "uSurfSpeed", 0.45f);
+    g3d_shader_set_float(sh, "uBreakDepth", 2.5f);
     {   /* same scene fog as the world so distant water dissolves into the horizon */
         int fen = 0; Vec3 fcol = vec3_make(0.7f, 0.78f, 0.88f); float fst = 0.0f, fnd = 1.0f;
         g3d_renderer_get_fog(&fen, &fcol, &fst, &fnd);
-        g3d_shader_set_int(g_water.shader, "uFogEnabled", fen);
-        g3d_shader_set_vec3(g_water.shader, "uFogColor", fcol);
-        g3d_shader_set_float(g_water.shader, "uFogStart", fst);
-        g3d_shader_set_float(g_water.shader, "uFogEnd", fnd);
+        g3d_shader_set_int(sh, "uFogEnabled", fen);
+        g3d_shader_set_vec3(sh, "uFogColor", fcol);
+        g3d_shader_set_float(sh, "uFogStart", fst);
+        g3d_shader_set_float(sh, "uFogEnd", fnd);
     }
-    g3d_shader_set_vec3(g_water.shader, "uWaterDeep",
-                        vec3_make(g_fluid.deep[0], g_fluid.deep[1], g_fluid.deep[2]));
-    g3d_shader_set_vec3(g_water.shader, "uWaterShallow",
-                        vec3_make(g_fluid.shallow[0], g_fluid.shallow[1], g_fluid.shallow[2]));
-    g3d_shader_set_float(g_water.shader, "uOpacity", g_fluid.opacity > 0.0f ? g_fluid.opacity : 0.85f);
-    g3d_shader_set_float(g_water.shader, "uLava", g_fluid.kind == 1 ? 1.0f : 0.0f);
-    g3d_shader_set_int(g_water.shader, "uHasRefl", 0);
-    set_ripple_uniforms(g_water.shader);
-    {
-        uint32_t scn = g3d_renderer_scene_texture();
-        if (scn) {
-            glActiveTexture(GL_TEXTURE2);
-            glBindTexture(GL_TEXTURE_2D, scn);
-            g3d_shader_set_int(g_water.shader, "uSceneTex", 2);
-            g3d_shader_set_int(g_water.shader, "uHasScene", 1);
-            g3d_shader_set_float(g_water.shader, "uRefract", 0.13f);
-            glActiveTexture(GL_TEXTURE0);
-        } else {
-            g3d_shader_set_int(g_water.shader, "uHasScene", 0);
-        }
+    set_ripple_uniforms(sh);
+    uint32_t scn = g3d_renderer_scene_texture();
+    if (scn) {
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, scn);
+        g3d_shader_set_int(sh, "uSceneTex", 2);
+        g3d_shader_set_int(sh, "uHasScene", 1);
+        g3d_shader_set_float(sh, "uRefract", 0.13f);
+        glActiveTexture(GL_TEXTURE0);
+    } else {
+        g3d_shader_set_int(sh, "uHasScene", 0);
+    }
+    /* Profundidad de escena: FOAM DE CONTACTO (el agua rompe/espuma donde toca
+       rocas, cascos, el personaje...) igual que en el mar, mas SSR. */
+    uint32_t dep = g3d_renderer_scene_depth_texture();
+    if (scn && dep) {
+        g3d_shader_set_mat4(sh, "uViewProj", mat4_multiply(proj, view));
+        g3d_shader_set_mat4(sh, "uInvProj", mat4_inverse(proj));
+        glActiveTexture(GL_TEXTURE3);
+        glBindTexture(GL_TEXTURE_2D, dep);
+        g3d_shader_set_int(sh, "uDepthTex", 3);
+        g3d_shader_set_int(sh, "uHasDepth", 1);
+        g3d_shader_set_int(sh, "uSSR", g_water.ssr ? 1 : 0);
+        g3d_shader_set_float(sh, "uSSRStrength", g_water.ssr_strength > 0.0f ? g_water.ssr_strength : 0.65f);
+        g3d_shader_set_float(sh, "uSSRStep", 0.4f);
+        glActiveTexture(GL_TEXTURE0);
+    } else {
+        g3d_shader_set_int(sh, "uHasDepth", 0);
+        g3d_shader_set_int(sh, "uSSR", 0);
     }
 
     Vec3 ldir = vec3_make(-0.5f, -1.0f, -0.4f);
@@ -969,13 +1008,14 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
             ldir = l->direction; lcol = vec3_make(l->color[0], l->color[1], l->color[2]); break;
         }
     }
-    g3d_shader_set_vec3(g_water.shader, "uLightDir", ldir);
-    g3d_shader_set_vec3(g_water.shader, "uLightColor", lcol);
+    g3d_shader_set_vec3(sh, "uLightDir", ldir);
+    g3d_shader_set_vec3(sh, "uLightColor", lcol);
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
+    if (use_tess) glPatchParameteri(GL_PATCH_VERTICES, 3);
     for (int i = 0; i < g_fluid.count; i++) {
         FluidZone *z = &g_fluid.zones[i];
         /* estilo PROPIO de la zona (olas, color, textura); si no tiene, el global */
@@ -983,39 +1023,40 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
         float len = z->has_style ? z->len : g_fluid.len;
         float spd = z->has_style ? z->speed : g_fluid.speed;
         const float *dp = z->has_style ? z->deep : g_fluid.deep;
-        const float *sh = z->has_style ? z->shallow : g_fluid.shallow;
+        const float *shc = z->has_style ? z->shallow : g_fluid.shallow;
         float op = z->has_style ? z->opacity : g_fluid.opacity;
         unsigned int tex = z->has_style ? z->tex : g_fluid.tex;
-        g3d_shader_set_float(g_water.shader, "uWaveAmp", amp);
-        g3d_shader_set_float(g_water.shader, "uWaveLen", len > 0.1f ? len : 0.1f);
-        g3d_shader_set_float(g_water.shader, "uWaveSpeed", spd);
-        g3d_shader_set_vec3(g_water.shader, "uWaterDeep", vec3_make(dp[0], dp[1], dp[2]));
-        g3d_shader_set_vec3(g_water.shader, "uWaterShallow", vec3_make(sh[0], sh[1], sh[2]));
-        g3d_shader_set_float(g_water.shader, "uOpacity", op > 0.0f ? op : 0.85f);
+        g3d_shader_set_float(sh, "uWaveAmp", amp);
+        g3d_shader_set_float(sh, "uWaveLen", len > 0.1f ? len : 0.1f);
+        g3d_shader_set_float(sh, "uWaveSpeed", spd);
+        g3d_shader_set_vec3(sh, "uWaterDeep", vec3_make(dp[0], dp[1], dp[2]));
+        g3d_shader_set_vec3(sh, "uWaterShallow", vec3_make(shc[0], shc[1], shc[2]));
+        g3d_shader_set_float(sh, "uOpacity", op > 0.0f ? op : 0.85f);
         if (tex) {
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, tex);
-            g3d_shader_set_int(g_water.shader, "uWaterTex", 0);
-            g3d_shader_set_int(g_water.shader, "uHasTex", 1);
+            g3d_shader_set_int(sh, "uWaterTex", 0);
+            g3d_shader_set_int(sh, "uHasTex", 1);
         } else {
-            g3d_shader_set_int(g_water.shader, "uHasTex", 0);
+            g3d_shader_set_int(sh, "uHasTex", 0);
         }
-        g3d_shader_set_float(g_water.shader, "uDepth", z->depth);
+        g3d_shader_set_float(sh, "uDepth", z->depth);
+        GLenum prim = use_tess ? GL_PATCHES : GL_TRIANGLES;
         if (z->mesh) {
             /* custom lake surface: already in world space at its level; its
                texcoord.x carries the shore depth, so enable shoreline foam */
-            g3d_shader_set_int(g_water.shader, "uShoreFoam", 1);
-            g3d_shader_set_mat4(g_water.shader, "uModel", mat4_identity());
+            g3d_shader_set_int(sh, "uShoreFoam", 1);
+            g3d_shader_set_mat4(sh, "uModel", mat4_identity());
             glBindVertexArray(z->mesh->vao);
-            glDrawElements(GL_TRIANGLES, z->mesh->index_count, GL_UNSIGNED_INT, 0);
+            glDrawElements(prim, z->mesh->index_count, GL_UNSIGNED_INT, 0);
         } else {
-            g3d_shader_set_int(g_water.shader, "uShoreFoam", 0);
+            g3d_shader_set_int(sh, "uShoreFoam", 0);
             Mat4 model = mat4_multiply(mat4_translate(z->cx, z->level, z->cz),
                                        mat4_scale(z->size_x, 1.0f, z->size_z));
-            g3d_shader_set_mat4(g_water.shader, "uModel", model);
+            g3d_shader_set_mat4(sh, "uModel", model);
             glBindVertexArray(g_fluid.unit_mesh ? g_fluid.unit_mesh->vao : 0);
             if (g_fluid.unit_mesh)
-                glDrawElements(GL_TRIANGLES, g_fluid.unit_mesh->index_count, GL_UNSIGNED_INT, 0);
+                glDrawElements(prim, g_fluid.unit_mesh->index_count, GL_UNSIGNED_INT, 0);
         }
     }
     glBindVertexArray(0);
@@ -1130,6 +1171,7 @@ void g3d_water_draw_mesh(G3DMesh *mesh, G3DCamera *camera, int flip_y) {
     g3d_shader_set_float(sh, "uLava", g_fluid.kind == 1 ? 1.0f : 0.0f);
     g3d_shader_set_float(sh, "uDepth", 2.0f);
     g3d_shader_set_int(sh, "uShoreFoam", 1);
+    g3d_shader_set_float(sh, "uEdgeFade", 1.5f);
     g3d_shader_set_int(sh, "uHasRefl", 0);
     set_ripple_uniforms(sh);
     {
