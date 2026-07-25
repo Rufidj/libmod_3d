@@ -198,6 +198,8 @@ int64_t g3d_fluid_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_reflection_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_reflection_flip_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_ripple_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_add_ripple_source_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_clear_ripple_sources_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_splash_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_mirror_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_mirror_set_flip_bgd(INSTANCE *my, int64_t *params);
@@ -554,6 +556,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_WATER_SET_REFLECTION", "IF", TYPE_INT, g3d_water_set_reflection_bgd),
     FUNC("G3D_WATER_SET_REFLECTION_FLIP", "I", TYPE_INT, g3d_water_set_reflection_flip_bgd),
     FUNC("G3D_WATER_RIPPLE", "FFF", TYPE_INT, g3d_water_ripple_bgd),
+    FUNC("G3D_WATER_ADD_RIPPLE_SOURCE", "FFF", TYPE_INT, g3d_water_add_ripple_source_bgd),
+    FUNC("G3D_WATER_CLEAR_RIPPLE_SOURCES", "", TYPE_INT, g3d_water_clear_ripple_sources_bgd),
     FUNC("G3D_WATER_SPLASH", "FFFF", TYPE_INT, g3d_water_splash_bgd),
     FUNC("G3D_MIRROR_CREATE", "FFFFFFFF", TYPE_INT, g3d_mirror_create_bgd),
     FUNC("G3D_MIRROR_SET_FLIP", "II", TYPE_INT, g3d_mirror_set_flip_bgd),

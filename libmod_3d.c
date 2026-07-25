@@ -1525,6 +1525,17 @@ int64_t g3d_water_ripple_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_water_add_ripple_source_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_add_ripple_source(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+
+int64_t g3d_water_clear_ripple_sources_bgd(INSTANCE *my, int64_t *params) {
+    (void)params;
+    g3d_water_clear_ripple_sources();
+    return 1;
+}
+
 int64_t g3d_water_splash_bgd(INSTANCE *my, int64_t *params) {
     g3d_water_splash(*(float *)&params[0], *(float *)&params[1],
                      *(float *)&params[2], *(float *)&params[3]);
