@@ -536,3 +536,45 @@ float g3d_lake_spill_level(float seed_x, float seed_z) {
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0.0f;
     return g3d_fluid_spill_level(H, side, ws, seed_x, seed_z, NULL);
 }
+
+/* ---------------------------------------------------------------------------
+   Rios: agua que sigue un camino de puntos por el terreno ACTIVO, con flujo
+   animado y cascadas donde el cauce cae un desnivel. Los puntos son (x,z); la
+   altura sale del terreno. El editor llama directo a g3d_river_add con su array
+   (x,y,z); el juego, que no pasa arrays comodamente por bgd, los acumula con
+   g3d_river_begin / g3d_river_point / g3d_river_end.
+   --------------------------------------------------------------------------- */
+int g3d_river_add(const float *pts_xyz, int n, float width) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2 || n < 2) return -1;
+    if (width < 0.1f) width = 3.0f;
+    float depth = 1.0f;
+    G3DMesh *rm = g3d_fluid_build_river(pts_xyz, n, H, side, ws, width, &depth);
+    if (rm) g3d_fluid_add_mesh(rm, depth);              /* superficie del cauce   */
+    g3d_flow_add_path(pts_xyz, n, width, 0.05f, 1.0f, 1.0f);  /* flujo animado    */
+    g3d_river_add_waterfalls(pts_xyz, n, H, side, ws, width); /* cascadas         */
+    return rm ? 0 : -1;
+}
+
+#define G3D_RIVER_MAXPTS 256
+static float g_river_pts[G3D_RIVER_MAXPTS * 3];
+static int   g_river_n = 0;
+static float g_river_w = 3.0f;
+
+int g3d_river_begin(float width) {
+    g_river_n = 0;
+    g_river_w = (width > 0.1f) ? width : 3.0f;
+    return 1;
+}
+int g3d_river_point(float x, float z) {
+    if (g_river_n >= G3D_RIVER_MAXPTS) return 0;
+    const float *H = NULL; int side = 0; float ws = 0.0f; float y = 0.0f;
+    if (g3d_scene_heightfield(&H, &side, &ws) && side >= 2)
+        y = g3d_heightfield_height(H, side, ws, x, z);   /* pega el punto al terreno */
+    g_river_pts[g_river_n * 3 + 0] = x;
+    g_river_pts[g_river_n * 3 + 1] = y;
+    g_river_pts[g_river_n * 3 + 2] = z;
+    g_river_n++;
+    return 1;
+}
+int g3d_river_end(void) { return g3d_river_add(g_river_pts, g_river_n, g_river_w); }

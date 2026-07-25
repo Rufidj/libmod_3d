@@ -36,6 +36,11 @@ int   g3d_scene_heightfield(const float **H, int *side, float *world_size);
 /* Lagos por flood-fill de alto nivel (rellenan un hoyo del terreno activo). */
 int   g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth);
 float g3d_lake_spill_level(float seed_x, float seed_z);
+/* Rios por camino de puntos (agua + flujo + cascadas). */
+int   g3d_river_add(const float *pts_xyz, int n, float width);
+int   g3d_river_begin(float width);
+int   g3d_river_point(float x, float z);
+int   g3d_river_end(void);
 
 /* Register a runtime-built terrain mesh as the collision heightfield (so rigid
    bodies / characters rest on a g3d_primitive_terrain + g3d_terrain_load relief,

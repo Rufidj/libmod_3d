@@ -185,6 +185,9 @@ int64_t g3d_fluid_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fluid_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fluid_style_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_lake_add_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_river_begin_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_river_point_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_river_end_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_lake_spill_level_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_waves_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_color_bgd(INSTANCE *my, int64_t *params);
@@ -537,6 +540,9 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_FLUID_STYLE", "FFFFFFFFFF", TYPE_INT, g3d_fluid_style_bgd),
     FUNC("G3D_LAKE_ADD", "FFFF", TYPE_INT, g3d_lake_add_bgd),
     FUNC("G3D_LAKE_SPILL_LEVEL", "FF", TYPE_FLOAT, g3d_lake_spill_level_bgd),
+    FUNC("G3D_RIVER_BEGIN", "F", TYPE_INT, g3d_river_begin_bgd),
+    FUNC("G3D_RIVER_POINT", "FF", TYPE_INT, g3d_river_point_bgd),
+    FUNC("G3D_RIVER_END", "", TYPE_INT, g3d_river_end_bgd),
     FUNC("G3D_WATER_SET_WAVES", "FFF", TYPE_INT, g3d_water_set_waves_bgd),
     FUNC("G3D_WATER_SET_COLOR", "FFFFFF", TYPE_INT, g3d_water_set_color_bgd),
     FUNC("G3D_WATER_SET_ENABLED", "I", TYPE_INT, g3d_water_set_enabled_bgd),
