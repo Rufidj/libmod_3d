@@ -952,7 +952,7 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
     g3d_shader_set_int(sh, "uHasRefl", 0);
     /* borde ancho: el lago se disuelve poco a poco en el agua/tierra que tiene
        debajo, para que al mezclarse con otro lago/mar no se note la costura. */
-    g3d_shader_set_float(sh, "uEdgeFade", 3.5f);
+    g3d_shader_set_float(sh, "uEdgeFade", 1.5f);
     /* olas de superficie tipo lago: sin oleaje direccional de mar, oleaje suave */
     g3d_shader_set_float(sh, "uSwellAmp", 0.0f);
     g3d_shader_set_int(sh, "uSurf", 0);

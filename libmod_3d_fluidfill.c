@@ -306,13 +306,15 @@ G3DMesh *g3d_fluid_build_river(const float *pts, int n, const float *H,
             float wx = cx + px * off, wz = cz + pz * off;
             float th = g3d_heightfield_height(H, side, ws, wx, wz);
             if (th < minh) minh = th;
-            /* Glue the surface to the terrain: keep it within a shallow depth of the
-               ground AT THIS vertex (sampled from the current, already-carved heights)
-               so the water hugs the slope instead of floating as a flat ribbon above
-               the hillside. `lev` still caps it (e.g. down to a lake's level). */
-            float vy = lev;
-            if (th + 0.5f < vy) vy = th + 0.5f;
-            float sd = vy - th; if (sd < 0.0f) sd = 0.0f;
+            /* La superficie va al NIVEL del rio (que el llamador ya coloca sobre el
+               cauce excavado + la profundidad, asi que sigue la pendiente). La
+               PROFUNDIDAD real = nivel - suelo en este vertice; es lo que da el
+               color somero->hondo, la espuma de orilla y el borde suave (como en
+               los motores pro). En las orillas, donde el banco sube por encima del
+               nivel, la profundidad es 0 y se levanta la superficie al suelo para
+               que no se meta bajo tierra (borde exacto del agua). */
+            float sd = lev - th; if (sd < 0.0f) sd = 0.0f;
+            float vy = (lev > th) ? lev : th;
             int vi = r * vcols + i;
             verts[vi].position[0] = wx;
             verts[vi].position[1] = vy;
