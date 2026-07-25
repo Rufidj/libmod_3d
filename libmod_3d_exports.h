@@ -184,6 +184,7 @@ int64_t g3d_water_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fluid_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fluid_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fluid_style_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_level_at_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_lake_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_river_begin_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_river_point_bgd(INSTANCE *my, int64_t *params);
@@ -538,6 +539,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_FLUID_ADD", "FFFFFF", TYPE_INT, g3d_fluid_add_bgd),
     FUNC("G3D_FLUID_CLEAR", "", TYPE_INT, g3d_fluid_clear_bgd),
     FUNC("G3D_FLUID_STYLE", "FFFFFFFFFF", TYPE_INT, g3d_fluid_style_bgd),
+    FUNC("G3D_WATER_LEVEL_AT", "FF", TYPE_FLOAT, g3d_water_level_at_bgd),
     FUNC("G3D_LAKE_ADD", "FFFF", TYPE_INT, g3d_lake_add_bgd),
     FUNC("G3D_LAKE_SPILL_LEVEL", "FF", TYPE_FLOAT, g3d_lake_spill_level_bgd),
     FUNC("G3D_RIVER_BEGIN", "F", TYPE_INT, g3d_river_begin_bgd),

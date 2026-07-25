@@ -1453,6 +1453,10 @@ int64_t g3d_river_point_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_river_end_bgd(INSTANCE *my, int64_t *params) {
     return g3d_river_end();
 }
+int64_t g3d_water_level_at_bgd(INSTANCE *my, int64_t *params) {
+    float v = g3d_water_level_at(*(float *)&params[0], *(float *)&params[1]);
+    return (int64_t) * (int32_t *)&v;
+}
 int64_t g3d_lake_add_bgd(INSTANCE *my, int64_t *params) {
     return g3d_lake_add(*(float *)&params[0], *(float *)&params[1],
                         *(float *)&params[2], *(float *)&params[3]);

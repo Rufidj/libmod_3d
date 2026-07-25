@@ -808,6 +808,35 @@ int g3d_fluid_add_mesh(G3DMesh *mesh, float depth) {
     return g_fluid.count++;
 }
 
+/* Nivel del AGUA en un punto del mundo (x,z): mira las zonas de fluido (lagos y
+   rios) y el plano de agua global, y devuelve la superficie mas alta que cubra ese
+   punto. Si no hay agua ahi, devuelve un valor muy negativo. Lo usan los objetos
+   fisicos para flotar en el agua que tengan DEBAJO, sea el mar, un lago o un rio,
+   en vez de un unico nivel global. Para lagos/rios se usa la caja del contorno
+   (aproximacion; suficiente para la flotacion). */
+float g3d_water_level_at(float x, float z) {
+    float best = -1.0e30f;
+    for (int i = 0; i < g_fluid.count; i++) {
+        FluidZone *fz = &g_fluid.zones[i];
+        if (fz->mesh) {
+            G3DMesh *m = fz->mesh;
+            if (x >= m->aabb_min[0] && x <= m->aabb_max[0] &&
+                z >= m->aabb_min[2] && z <= m->aabb_max[2]) {
+                if (m->aabb_max[1] > best) best = m->aabb_max[1];
+            }
+        } else {
+            float hx = fz->size_x * 0.5f, hz = fz->size_z * 0.5f;
+            if (x >= fz->cx - hx && x <= fz->cx + hx &&
+                z >= fz->cz - hz && z <= fz->cz + hz) {
+                if (fz->level > best) best = fz->level;
+            }
+        }
+    }
+    if (g_water.enabled && g_water.initialized && g_water.level > best)
+        best = g_water.level;
+    return best;
+}
+
 int g3d_fluid_add(float cx, float cz, float size_x, float size_z,
                   float level, float depth) {
     if (g_fluid.count >= MAX_FLUIDS) return -1;

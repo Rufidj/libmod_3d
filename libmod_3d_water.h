@@ -96,6 +96,8 @@ void g3d_fluid_set_style(float amp, float len, float speed,
 /* Add a fluid zone from a caller-built world-space mesh (e.g. a flood-filled
    lake). Engine takes ownership of the mesh. depth deepens the colour. */
 int g3d_fluid_add_mesh(G3DMesh *mesh, float depth);
+/* Nivel del agua (mar/lago/rio) en un punto, o muy negativo si no hay. */
+float g3d_water_level_at(float x, float z);
 
 /* Material kind for all fluid zones: 0 = water, 1 = lava (emissive molten glow,
    slow flowing crust, opaque, no reflection/refraction). */
