@@ -507,3 +507,32 @@ int g3d_scene_load(const char *file) {
     fprintf(stderr, "G3D: scene loaded: %s\n", file);
     return scene;
 }
+
+/* ---------------------------------------------------------------------------
+   Lagos por flood-fill, de alto nivel (una sola llamada, sin punteros).
+   Rellenan una depresion del terreno ACTIVO desde un punto semilla hasta un
+   nivel de agua, con la forma exacta del hueco. Lo usan el editor (vista previa)
+   y el juego generado. Necesitan que el terreno este registrado como
+   colisionador (g3d_set_terrain_collider), que es de donde sale el heightfield.
+   --------------------------------------------------------------------------- */
+int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return -1;
+    unsigned char *filled = (unsigned char *)calloc((size_t)side * side, 1);
+    float d = depth;
+    /* footprint = celdas por debajo del nivel; superficie al mismo nivel;
+       radio maximo = todo el mapa (que llene la depresion entera). */
+    G3DMesh *lm = g3d_fluid_build_lake(H, side, ws, seed_x, seed_z,
+                                       surface_y, surface_y, NULL, filled, &d, ws);
+    if (filled) free(filled);
+    if (!lm) return -1;
+    return g3d_fluid_add_mesh(lm, d);
+}
+
+/* Nivel al que se desbordaria una depresion desde el punto semilla (para poner
+   el agua justo por debajo y que no rebose por el borde del mapa). */
+float g3d_lake_spill_level(float seed_x, float seed_z) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0.0f;
+    return g3d_fluid_spill_level(H, side, ws, seed_x, seed_z, NULL);
+}

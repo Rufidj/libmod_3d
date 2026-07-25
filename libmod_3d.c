@@ -1444,6 +1444,14 @@ int64_t g3d_fluid_clear_bgd(INSTANCE *my, int64_t *params) {
 
 /* Estilo de TODAS las zonas de fluido: olas (amp,len,speed), color profundo (rgb)
    y de orilla (rgb), y opacidad (0=transparente..1=opaco). Sin textura. */
+int64_t g3d_lake_add_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_lake_add(*(float *)&params[0], *(float *)&params[1],
+                        *(float *)&params[2], *(float *)&params[3]);
+}
+int64_t g3d_lake_spill_level_bgd(INSTANCE *my, int64_t *params) {
+    float v = g3d_lake_spill_level(*(float *)&params[0], *(float *)&params[1]);
+    return (int64_t) * (int32_t *)&v;
+}
 int64_t g3d_fluid_style_bgd(INSTANCE *my, int64_t *params) {
     g3d_fluid_set_style(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
                         *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
