@@ -737,6 +737,14 @@ typedef struct {
     float cx, cz, level, depth;
     float size_x, size_z;
     G3DMesh *mesh;   /* custom lake surface (world-space). NULL = rectangle (unit_mesh scaled) */
+    /* Estilo PROPIO de la zona (olas, color, textura). Se captura del estilo global
+       en el momento de crearla, para que cada lago/rio tenga sus efectos. Si
+       has_style es 0 se usa el estilo global g_fluid.* (compatibilidad). */
+    float amp, len, speed;
+    float deep[3], shallow[3];
+    float opacity;
+    unsigned int tex;
+    int has_style;
 } FluidZone;
 
 static struct {
@@ -750,6 +758,27 @@ static struct {
     int style_set;
     int kind;                  /* 0 = water, 1 = lava (emissive, slow, opaque) */
 } g_fluid = {0};
+
+/* Rellena el estilo global con los valores por defecto si aun no se ha fijado. */
+static void fluid_ensure_default_style(void) {
+    if (g_fluid.style_set) return;
+    g_fluid.amp = 0.25f; g_fluid.len = 6.0f; g_fluid.speed = 1.3f;
+    g_fluid.deep[0] = 0.03f; g_fluid.deep[1] = 0.18f; g_fluid.deep[2] = 0.30f;
+    g_fluid.shallow[0] = 0.15f; g_fluid.shallow[1] = 0.42f; g_fluid.shallow[2] = 0.55f;
+    if (g_fluid.opacity <= 0.0f) g_fluid.opacity = 0.85f;
+}
+
+/* Copia el estilo global ACTUAL en la zona, para que conserve sus propios
+   efectos aunque luego se cambie el estilo global para otra zona. */
+static void fluid_zone_capture_style(FluidZone *z) {
+    fluid_ensure_default_style();
+    z->amp = g_fluid.amp; z->len = g_fluid.len; z->speed = g_fluid.speed;
+    z->deep[0] = g_fluid.deep[0]; z->deep[1] = g_fluid.deep[1]; z->deep[2] = g_fluid.deep[2];
+    z->shallow[0] = g_fluid.shallow[0]; z->shallow[1] = g_fluid.shallow[1]; z->shallow[2] = g_fluid.shallow[2];
+    z->opacity = g_fluid.opacity > 0.0f ? g_fluid.opacity : 0.85f;
+    z->tex = g_fluid.tex;
+    z->has_style = 1;
+}
 
 void g3d_fluid_clear(void) {
     for (int i = 0; i < g_fluid.count; i++)
@@ -799,12 +828,7 @@ int g3d_fluid_add_mesh(G3DMesh *mesh, float depth) {
     FluidZone *z = &g_fluid.zones[g_fluid.count];
     z->cx = z->cz = z->size_x = z->size_z = 0.0f;
     z->level = 0.0f; z->depth = depth; z->mesh = mesh;
-    if (!g_fluid.style_set) {
-        g_fluid.amp = 0.25f; g_fluid.len = 6.0f; g_fluid.speed = 1.3f;
-        g_fluid.deep[0] = 0.03f; g_fluid.deep[1] = 0.18f; g_fluid.deep[2] = 0.30f;
-        g_fluid.shallow[0] = 0.15f; g_fluid.shallow[1] = 0.42f; g_fluid.shallow[2] = 0.55f;
-        if (g_fluid.opacity <= 0.0f) g_fluid.opacity = 0.85f;
-    }
+    fluid_zone_capture_style(z);
     return g_fluid.count++;
 }
 
@@ -857,12 +881,8 @@ int g3d_fluid_add(float cx, float cz, float size_x, float size_z,
     FluidZone *z = &g_fluid.zones[g_fluid.count];
     z->cx = cx; z->cz = cz; z->level = level; z->depth = depth;
     z->size_x = size_x; z->size_z = size_z;
-    if (!g_fluid.style_set) {
-        g_fluid.amp = 0.25f; g_fluid.len = 6.0f; g_fluid.speed = 1.3f;
-        g_fluid.deep[0] = 0.03f; g_fluid.deep[1] = 0.18f; g_fluid.deep[2] = 0.30f;
-        g_fluid.shallow[0] = 0.15f; g_fluid.shallow[1] = 0.42f; g_fluid.shallow[2] = 0.55f;
-        if (g_fluid.opacity <= 0.0f) g_fluid.opacity = 0.85f;
-    }
+    z->mesh = NULL;
+    fluid_zone_capture_style(z);
     return g_fluid.count++;
 }
 
@@ -952,21 +972,34 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
     g3d_shader_set_vec3(g_water.shader, "uLightDir", ldir);
     g3d_shader_set_vec3(g_water.shader, "uLightColor", lcol);
 
-    if (g_fluid.tex) {
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, g_fluid.tex);
-        g3d_shader_set_int(g_water.shader, "uWaterTex", 0);
-        g3d_shader_set_int(g_water.shader, "uHasTex", 1);
-    } else {
-        g3d_shader_set_int(g_water.shader, "uHasTex", 0);
-    }
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
     for (int i = 0; i < g_fluid.count; i++) {
         FluidZone *z = &g_fluid.zones[i];
+        /* estilo PROPIO de la zona (olas, color, textura); si no tiene, el global */
+        float amp = z->has_style ? z->amp : g_fluid.amp;
+        float len = z->has_style ? z->len : g_fluid.len;
+        float spd = z->has_style ? z->speed : g_fluid.speed;
+        const float *dp = z->has_style ? z->deep : g_fluid.deep;
+        const float *sh = z->has_style ? z->shallow : g_fluid.shallow;
+        float op = z->has_style ? z->opacity : g_fluid.opacity;
+        unsigned int tex = z->has_style ? z->tex : g_fluid.tex;
+        g3d_shader_set_float(g_water.shader, "uWaveAmp", amp);
+        g3d_shader_set_float(g_water.shader, "uWaveLen", len > 0.1f ? len : 0.1f);
+        g3d_shader_set_float(g_water.shader, "uWaveSpeed", spd);
+        g3d_shader_set_vec3(g_water.shader, "uWaterDeep", vec3_make(dp[0], dp[1], dp[2]));
+        g3d_shader_set_vec3(g_water.shader, "uWaterShallow", vec3_make(sh[0], sh[1], sh[2]));
+        g3d_shader_set_float(g_water.shader, "uOpacity", op > 0.0f ? op : 0.85f);
+        if (tex) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, tex);
+            g3d_shader_set_int(g_water.shader, "uWaterTex", 0);
+            g3d_shader_set_int(g_water.shader, "uHasTex", 1);
+        } else {
+            g3d_shader_set_int(g_water.shader, "uHasTex", 0);
+        }
         g3d_shader_set_float(g_water.shader, "uDepth", z->depth);
         if (z->mesh) {
             /* custom lake surface: already in world space at its level; its
