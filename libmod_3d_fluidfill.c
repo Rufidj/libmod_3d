@@ -156,52 +156,79 @@ G3DMesh *g3d_fluid_build_lake(const float *H, int side, float ws,
     if (out_filled)
         for (int k = 0; k < N; k++) if (in[k]) out_filled[k] = 1;
 
-    /* Emit one quad per flooded CELL (a vertex-cell whose 4 corners are flooded
-       counts; we use vertex membership of its bottom-left corner for simplicity:
-       a cell (i,j) is watered if vertex (i,j) is in the basin). */
-    /* Count watered cells. */
+    /* Waterline por MARCHING-SQUARES. En las celdas del borde no se emite el
+       cuadrado entero (eso daba una orilla dentada, escalera de la rejilla): se
+       recorta el agua justo donde el terreno cruza la superficie del agua
+       (H == surfaceY), interpolando en las aristas. Asi la linea de costa es una
+       curva suave que sigue el relieve. Las celdas del interior (4 esquinas bajo
+       el agua) siguen siendo un cuadrado completo. */
+    /* Celdas que aportan: las que tienen al menos una esquina en la cuenca. */
     int cells = 0;
     for (int j = 0; j < grid; j++)
-        for (int i = 0; i < grid; i++)
-            if (in[j * side + i]) cells++;
+        for (int i = 0; i < grid; i++) {
+            int c0 = j*side+i, c1 = j*side+i+1, c2 = (j+1)*side+i+1, c3 = (j+1)*side+i;
+            if (in[c0] || in[c1] || in[c2] || in[c3]) cells++;
+        }
     if (cells == 0) { free(in); if (out_depth) *out_depth = 0.0f; return NULL; }
 
-    G3DVertex *verts = (G3DVertex *)malloc((size_t)cells * 4 * sizeof(G3DVertex));
-    uint32_t *idx = (uint32_t *)malloc((size_t)cells * 6 * sizeof(uint32_t));
+    /* Cada celda del borde produce hasta un hexagono (6 vertices -> 4 triangulos).
+       Se sobredimensiona con holgura. */
+    G3DVertex *verts = (G3DVertex *)malloc((size_t)cells * 6 * sizeof(G3DVertex));
+    uint32_t *idx = (uint32_t *)malloc((size_t)cells * 12 * sizeof(uint32_t));
     int v = 0, ic = 0;
-    float cell_w = ws / (float)grid;
     for (int j = 0; j < grid; j++) {
         for (int i = 0; i < grid; i++) {
-            if (!in[j * side + i]) continue;
-            float x0 = ((float)i / grid - 0.5f) * ws;
-            float z0 = ((float)j / grid - 0.5f) * ws;
-            float x1 = x0 + cell_w, z1 = z0 + cell_w;
-            int base = v;
-            float cx[4] = { x0, x1, x0, x1 };
-            float cz[4] = { z0, z0, z1, z1 };
-            /* terrain height at the 4 corners -> shore depth (surfaceY - terrain),
-               packed into texcoord.x so the shader can foam the shallow edges */
-            int ci[4] = { i, i + 1, i, i + 1 };
-            int cj[4] = { j, j, j + 1, j + 1 };
+            int cc[4] = { j*side+i, j*side+i+1, (j+1)*side+i+1, (j+1)*side+i };
+            if (!in[cc[0]] && !in[cc[1]] && !in[cc[2]] && !in[cc[3]]) continue;
+            /* esquinas en orden CCW y su posicion en el mundo */
+            float xi = ((float)i / grid - 0.5f) * ws, xi1 = ((float)(i+1) / grid - 0.5f) * ws;
+            float zj = ((float)j / grid - 0.5f) * ws, zj1 = ((float)(j+1) / grid - 0.5f) * ws;
+            float px[4] = { xi, xi1, xi1, xi };
+            float pz[4] = { zj, zj,  zj1, zj1 };
+
+            /* recorrer las 4 aristas: se anaden las esquinas dentro del agua y, en
+               cada cambio dentro/fuera, el punto donde el terreno cruza surfaceY. */
+            float ox[8], oz[8], osd[8]; int np = 0;
             for (int k = 0; k < 4; k++) {
-                int ic2 = ci[k] > grid ? grid : ci[k];
-                int jc2 = cj[k] > grid ? grid : cj[k];
-                float th = H[jc2 * side + ic2];
-                float sd = surfaceY - th; if (sd < 0.0f) sd = 0.0f;
-                verts[v].position[0] = cx[k];
-                verts[v].position[1] = surfaceY;   /* water surface height */
-                verts[v].position[2] = cz[k];
+                int a = k, b = (k + 1) & 3;
+                int ina = in[cc[a]], inb = in[cc[b]];
+                if (ina) {
+                    float sd = surfaceY - H[cc[a]]; if (sd < 0.0f) sd = 0.0f;
+                    ox[np] = px[a]; oz[np] = pz[a]; osd[np] = sd; np++;
+                }
+                if (ina != inb) {
+                    /* punto de cruce: donde H == surfaceY entre a y b (orilla) */
+                    float ha = H[cc[a]], hb = H[cc[b]], den = hb - ha;
+                    float t = (den > 1e-5f || den < -1e-5f) ? (surfaceY - ha) / den : 0.5f;
+                    if (t < 0.02f) t = 0.02f; if (t > 0.98f) t = 0.98f;
+                    ox[np] = px[a] + (px[b] - px[a]) * t;
+                    oz[np] = pz[a] + (pz[b] - pz[a]) * t;
+                    osd[np] = 0.0f;   /* justo en la orilla: agua poco profunda (espuma) */
+                    np++;
+                }
+            }
+            if (np < 3) continue;
+            int base = v;
+            for (int k = 0; k < np; k++) {
+                verts[v].position[0] = ox[k];
+                verts[v].position[1] = surfaceY;
+                verts[v].position[2] = oz[k];
                 verts[v].normal[0] = 0; verts[v].normal[1] = 1; verts[v].normal[2] = 0;
-                verts[v].texcoord[0] = sd; verts[v].texcoord[1] = 0;
+                verts[v].texcoord[0] = osd[k]; verts[v].texcoord[1] = 0;
                 v++;
             }
-            idx[ic++] = base + 0; idx[ic++] = base + 2; idx[ic++] = base + 1;
-            idx[ic++] = base + 1; idx[ic++] = base + 2; idx[ic++] = base + 3;
+            /* triangular el poligono como abanico (CCW) */
+            for (int k = 1; k + 1 < np; k++) {
+                idx[ic++] = base;
+                idx[ic++] = base + k;
+                idx[ic++] = base + k + 1;
+            }
         }
     }
     free(in);
+    if (v < 3 || ic < 3) { free(verts); free(idx); if (out_depth) *out_depth = 0.0f; return NULL; }
 
-    G3DMesh *mesh = g3d_mesh_create("lake", verts, (uint32_t)(cells * 4), idx, (uint32_t)(cells * 6));
+    G3DMesh *mesh = g3d_mesh_create("lake", verts, (uint32_t)v, idx, (uint32_t)ic);
     free(verts); free(idx);
     if (mesh) g3d_mesh_upload_gpu(mesh);
     if (out_depth) { float d = surfaceY - minh; *out_depth = d > 0.0f ? d : 0.0f; }
