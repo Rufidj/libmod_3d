@@ -170,6 +170,8 @@ static const char *water_frag =
     "uniform sampler2D uDepthTex;\n"   /* opaque scene depth copy (SSR + contact foam) */
     "uniform mat4 uViewProj;\n"        /* world -> clip (projects the reflected ray) */
     "uniform mat4 uInvProj;\n"         /* clip -> view (reconstruct depth for contact foam) */
+    "uniform mat4 uInvViewProj;\n"     /* clip -> world (reconstruct terrain pos for shoreline) */
+    "uniform int uDepthShore;\n"       /* 1 = orilla suave POR PIXEL desde el depth buffer */
     "uniform int uHasDepth;\n"
     "uniform int uSSR;\n"
     "uniform float uSSRStrength;\n"
@@ -250,17 +252,32 @@ static const char *water_frag =
     // Schlick Fresnel: water is barely reflective head-on, mirror-like at grazing
     "    float fres = 0.02 + 0.98 * pow(1.0 - max(dot(N, V), 0.0), 5.0);\n"
     "    vec3 L = normalize(-uLightDir);\n"
+    // screen-space position of this fragment (for refraction / planar reflection / depth)
+    "    vec2 suv = vClip.xy / vClip.w * 0.5 + 0.5;\n"
+    // ---- Shoreline POR PIXEL (tecnica de motores pro) ----
+    // La profundidad de la orilla se calcula por PIXEL desde el depth buffer:
+    // se reconstruye la posicion del terreno detras de este pixel y se resta a la
+    // altura de la superficie del agua. Asi el borde es liso (no depende de la
+    // rejilla de la malla, que daba el escalonado). Si el terreno esta por encima
+    // del agua, este pixel es tierra -> se descarta. Cae a la profundidad de la
+    // malla (vShoreDepth) si no hay depth buffer.
+    "    float sdepth = vShoreDepth;\n"
+    "    if (uDepthShore == 1 && uHasDepth == 1) {\n"
+    "        float sdz = texture(uDepthTex, suv).r;\n"
+    "        vec4 wp = uInvViewProj * vec4(suv * 2.0 - 1.0, sdz * 2.0 - 1.0, 1.0);\n"
+    "        float terrainY = wp.y / wp.w;\n"
+    "        sdepth = vWorldPos.y - terrainY;\n"          // profundidad del agua aqui
+    "        if (sdepth < 0.04) discard;\n"               // terreno por encima -> tierra
+    "    }\n"
     // Colour by REAL water depth (shore depth): turquoise in the shallows -> deep blue
     // offshore. (Falls back to the fixed uDepth for the classic plane with no shore data.)
-    "    float depthF = clamp((uShoreFoam == 1 ? vShoreDepth : uDepth) / 14.0, 0.0, 1.0);\n"
+    "    float depthF = clamp((uShoreFoam == 1 ? sdepth : uDepth) / 14.0, 0.0, 1.0);\n"
     "    float deepMix = clamp(depthF * 1.15, 0.0, 1.0);\n"
     "    vec3 base = mix(uWaterShallow, uWaterDeep, deepMix);\n"
     "    if (uHasTex == 1) base = mix(base, base * texTint, 0.4);\n"
-    // screen-space position of this fragment (for refraction / planar reflection)
-    "    vec2 suv = vClip.xy / vClip.w * 0.5 + 0.5;\n"
     // refraction: sample the scene behind the water, distorted by the surface
     // normal; near the shore (shallow) don't distort so the edge stays soft.
-    "    float shore = (uShoreFoam == 1) ? smoothstep(0.0, max(uEdgeFade, 0.001), vShoreDepth) : 1.0;\n"
+    "    float shore = (uShoreFoam == 1) ? smoothstep(0.0, max(uEdgeFade, 0.001), sdepth) : 1.0;\n"
     "    vec3 refr = base;\n"
     "    if (uHasScene == 1) {\n"
     "        vec2 ruv = clamp(suv + N.xz * uRefract * shore, 0.002, 0.998);\n"
@@ -269,7 +286,7 @@ static const char *water_frag =
     // visible (capped) so the effect doesn't vanish in deep water.
     // Turbidity = uOpacity: 0 crystal clear (see the bottom), 1 opaque (water
     // colour only). A touch of depth makes deeper water a bit murkier.
-    "        float dturb = (uShoreFoam == 1) ? smoothstep(0.0, 40.0, vShoreDepth) * 0.2 : depthF * 0.2;\n"
+    "        float dturb = (uShoreFoam == 1) ? smoothstep(0.0, 40.0, sdepth) * 0.2 : depthF * 0.2;\n"
     "        float murk = clamp(uOpacity + dturb, 0.0, 1.0);\n"
     "        refr = mix(bottom, base, murk);\n"   // clear shows bottom, murky shows water
     "    }\n"
@@ -324,12 +341,12 @@ static const char *water_frag =
     // Shoreline break: whitewater ONLY in shallow water (near the waterline), and it PULSES
     // as each swell crest arrives -> the wave "breaks" when it reaches the beach.
     "    if (uShoreFoam == 1) {\n"
-    "        float atShore = smoothstep(uBreakDepth, 0.0, vShoreDepth);\n"    // 1 at waterline -> 0 offshore
-    "        float edgeFade = smoothstep(0.0, 0.35, vShoreDepth);\n"          // soften the very waterline
+    "        float atShore = smoothstep(uBreakDepth, 0.0, sdepth);\n"    // 1 at waterline -> 0 offshore
+    "        float edgeFade = smoothstep(0.0, 0.35, sdepth);\n"          // soften the very waterline
     "        float broken = 0.5 + 0.5 * n;\n"
     "        float amt = 0.65;\n"                                             // static lapping
     "        if (uSurf == 1) {\n"
-    "            float ph = vShoreDepth * uSurfFreq - uTime * uSurfSpeed;\n"
+    "            float ph = sdepth * uSurfFreq - uTime * uSurfSpeed;\n"
     "            float arrive = pow(0.5 + 0.5 * sin(ph * 6.2831853), 3.0);\n" // sharp breaking pulse
     "            amt = 0.25 + 0.75 * arrive;\n"
     "        }\n"
@@ -647,6 +664,7 @@ void g3d_water_render_pass(G3DCamera *camera, int flip_y) {
     g3d_shader_set_float(g_water.shader, "uOpacity", 0.9f);
     g3d_shader_set_float(g_water.shader, "uLava", 0.0f);   /* global water is never lava */
     g3d_shader_set_int(g_water.shader, "uShoreFoam", 0);   /* crest foam only */
+    g3d_shader_set_int(g_water.shader, "uDepthShore", 0);  /* el mar global no descarta por pixel */
     set_ripple_uniforms(g_water.shader);
     {
         uint32_t scn = g3d_renderer_scene_texture();
@@ -985,16 +1003,19 @@ void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
     if (scn && dep) {
         g3d_shader_set_mat4(sh, "uViewProj", mat4_multiply(proj, view));
         g3d_shader_set_mat4(sh, "uInvProj", mat4_inverse(proj));
+        g3d_shader_set_mat4(sh, "uInvViewProj", mat4_inverse(mat4_multiply(proj, view)));
         glActiveTexture(GL_TEXTURE3);
         glBindTexture(GL_TEXTURE_2D, dep);
         g3d_shader_set_int(sh, "uDepthTex", 3);
         g3d_shader_set_int(sh, "uHasDepth", 1);
+        g3d_shader_set_int(sh, "uDepthShore", 1);   /* orilla suave por pixel */
         g3d_shader_set_int(sh, "uSSR", g_water.ssr ? 1 : 0);
         g3d_shader_set_float(sh, "uSSRStrength", g_water.ssr_strength > 0.0f ? g_water.ssr_strength : 0.65f);
         g3d_shader_set_float(sh, "uSSRStep", 0.4f);
         glActiveTexture(GL_TEXTURE0);
     } else {
         g3d_shader_set_int(sh, "uHasDepth", 0);
+        g3d_shader_set_int(sh, "uDepthShore", 0);
         g3d_shader_set_int(sh, "uSSR", 0);
     }
 
@@ -1204,6 +1225,7 @@ void g3d_water_draw_mesh(G3DMesh *mesh, G3DCamera *camera, int flip_y) {
             g3d_shader_set_int(sh, "uSSR", 0);
             g3d_shader_set_int(sh, "uHasDepth", 0);
         }
+        g3d_shader_set_int(sh, "uDepthShore", 0);   /* sim: orilla por malla, no descarta */
     }
     set_ocean_uniforms(sh);   /* swell + breaking surf (ocean/beach) */
     Vec3 ldir = vec3_make(-0.5f, -1.0f, -0.4f);

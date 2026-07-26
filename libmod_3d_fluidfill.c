@@ -156,76 +156,61 @@ G3DMesh *g3d_fluid_build_lake(const float *H, int side, float ws,
     if (out_filled)
         for (int k = 0; k < N; k++) if (in[k]) out_filled[k] = 1;
 
-    /* Waterline por MARCHING-SQUARES. En las celdas del borde no se emite el
-       cuadrado entero (eso daba una orilla dentada, escalera de la rejilla): se
-       recorta el agua justo donde el terreno cruza la superficie del agua
-       (H == surfaceY), interpolando en las aristas. Asi la linea de costa es una
-       curva suave que sigue el relieve. Las celdas del interior (4 esquinas bajo
-       el agua) siguen siendo un cuadrado completo. */
-    /* Celdas que aportan: las que tienen al menos una esquina en la cuenca. */
+    /* Superficie del lago = rejilla de cuadrados completos sobre la cuenca,
+       DILATADA una celda sobre la orilla. NO se recorta la orilla en la malla
+       (eso daba el borde dentado/escalera de la rejilla): la linea de costa se
+       dibuja POR PIXEL en el shader (compara la altura del agua con la del terreno
+       detras, via depth buffer, y descarta/funde la tierra). Por eso la malla
+       cubre un poco de tierra: para que el shader tenga pixeles donde dibujar el
+       borde liso. Es la tecnica de los motores 3D (soft shoreline por profundidad). */
+    unsigned char *emit = (unsigned char *)calloc((size_t)N, 1);   /* por VERTICE */
+    for (int j = 0; j <= grid; j++)
+        for (int i = 0; i <= grid; i++) {
+            /* marca el vertice si el o algun vecino (3x3) esta en la cuenca -> dilata */
+            int hit = 0;
+            for (int dj = -1; dj <= 1 && !hit; dj++)
+                for (int di = -1; di <= 1; di++) {
+                    int ni = i+di, nj = j+dj;
+                    if (ni < 0 || nj < 0 || ni > grid || nj > grid) continue;
+                    if (in[nj*side+ni]) { hit = 1; break; }
+                }
+            if (hit) emit[j*side+i] = 1;
+        }
+    /* cuenta celdas a emitir (las 4 esquinas marcadas) */
     int cells = 0;
     for (int j = 0; j < grid; j++)
         for (int i = 0; i < grid; i++) {
-            int c0 = j*side+i, c1 = j*side+i+1, c2 = (j+1)*side+i+1, c3 = (j+1)*side+i;
-            if (in[c0] || in[c1] || in[c2] || in[c3]) cells++;
+            int c0=j*side+i, c1=j*side+i+1, c2=(j+1)*side+i+1, c3=(j+1)*side+i;
+            if (emit[c0] && emit[c1] && emit[c2] && emit[c3]) cells++;
         }
-    if (cells == 0) { free(in); if (out_depth) *out_depth = 0.0f; return NULL; }
+    if (cells == 0) { free(in); free(emit); if (out_depth) *out_depth = 0.0f; return NULL; }
 
-    /* Cada celda del borde produce hasta un hexagono (6 vertices -> 4 triangulos).
-       Se sobredimensiona con holgura. */
-    G3DVertex *verts = (G3DVertex *)malloc((size_t)cells * 6 * sizeof(G3DVertex));
-    uint32_t *idx = (uint32_t *)malloc((size_t)cells * 12 * sizeof(uint32_t));
+    G3DVertex *verts = (G3DVertex *)malloc((size_t)cells * 4 * sizeof(G3DVertex));
+    uint32_t *idx = (uint32_t *)malloc((size_t)cells * 6 * sizeof(uint32_t));
     int v = 0, ic = 0;
     for (int j = 0; j < grid; j++) {
         for (int i = 0; i < grid; i++) {
             int cc[4] = { j*side+i, j*side+i+1, (j+1)*side+i+1, (j+1)*side+i };
-            if (!in[cc[0]] && !in[cc[1]] && !in[cc[2]] && !in[cc[3]]) continue;
-            /* esquinas en orden CCW y su posicion en el mundo */
+            if (!emit[cc[0]] || !emit[cc[1]] || !emit[cc[2]] || !emit[cc[3]]) continue;
             float xi = ((float)i / grid - 0.5f) * ws, xi1 = ((float)(i+1) / grid - 0.5f) * ws;
             float zj = ((float)j / grid - 0.5f) * ws, zj1 = ((float)(j+1) / grid - 0.5f) * ws;
             float px[4] = { xi, xi1, xi1, xi };
             float pz[4] = { zj, zj,  zj1, zj1 };
-
-            /* recorrer las 4 aristas: se anaden las esquinas dentro del agua y, en
-               cada cambio dentro/fuera, el punto donde el terreno cruza surfaceY. */
-            float ox[8], oz[8], osd[8]; int np = 0;
-            for (int k = 0; k < 4; k++) {
-                int a = k, b = (k + 1) & 3;
-                int ina = in[cc[a]], inb = in[cc[b]];
-                if (ina) {
-                    float sd = surfaceY - H[cc[a]]; if (sd < 0.0f) sd = 0.0f;
-                    ox[np] = px[a]; oz[np] = pz[a]; osd[np] = sd; np++;
-                }
-                if (ina != inb) {
-                    /* punto de cruce: donde H == surfaceY entre a y b (orilla) */
-                    float ha = H[cc[a]], hb = H[cc[b]], den = hb - ha;
-                    float t = (den > 1e-5f || den < -1e-5f) ? (surfaceY - ha) / den : 0.5f;
-                    if (t < 0.02f) t = 0.02f; if (t > 0.98f) t = 0.98f;
-                    ox[np] = px[a] + (px[b] - px[a]) * t;
-                    oz[np] = pz[a] + (pz[b] - pz[a]) * t;
-                    osd[np] = 0.0f;   /* justo en la orilla: agua poco profunda (espuma) */
-                    np++;
-                }
-            }
-            if (np < 3) continue;
             int base = v;
-            for (int k = 0; k < np; k++) {
-                verts[v].position[0] = ox[k];
+            for (int k = 0; k < 4; k++) {
+                float sd = surfaceY - H[cc[k]]; if (sd < 0.0f) sd = 0.0f;   /* fallback */
+                verts[v].position[0] = px[k];
                 verts[v].position[1] = surfaceY;
-                verts[v].position[2] = oz[k];
+                verts[v].position[2] = pz[k];
                 verts[v].normal[0] = 0; verts[v].normal[1] = 1; verts[v].normal[2] = 0;
-                verts[v].texcoord[0] = osd[k]; verts[v].texcoord[1] = 0;
+                verts[v].texcoord[0] = sd; verts[v].texcoord[1] = 0;
                 v++;
             }
-            /* triangular el poligono como abanico (CCW) */
-            for (int k = 1; k + 1 < np; k++) {
-                idx[ic++] = base;
-                idx[ic++] = base + k;
-                idx[ic++] = base + k + 1;
-            }
+            idx[ic++] = base;   idx[ic++] = base+2; idx[ic++] = base+1;
+            idx[ic++] = base;   idx[ic++] = base+3; idx[ic++] = base+2;
         }
     }
-    free(in);
+    free(in); free(emit);
     if (v < 3 || ic < 3) { free(verts); free(idx); if (out_depth) *out_depth = 0.0f; return NULL; }
 
     G3DMesh *mesh = g3d_mesh_create("lake", verts, (uint32_t)v, idx, (uint32_t)ic);
