@@ -1542,6 +1542,14 @@ int64_t g3d_water_splash_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_fluid_block_reset_bgd(INSTANCE *my, int64_t *params) {
+    (void)params; g3d_fluid_block_reset(); return 1;
+}
+
+int64_t g3d_river_block_bgd(INSTANCE *my, int64_t *params) {
+    (void)params; return g3d_river_block();
+}
+
 /* Mirror */
 int64_t g3d_mirror_create_bgd(INSTANCE *my, int64_t *params) {
     float px = *(float *)&params[0];

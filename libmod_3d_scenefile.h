@@ -36,11 +36,16 @@ int   g3d_scene_heightfield(const float **H, int *side, float *world_size);
 /* Lagos por flood-fill de alto nivel (rellenan un hoyo del terreno activo). */
 int   g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth);
 float g3d_lake_spill_level(float seed_x, float seed_z);
+/* Mascara de bloqueo del flood-fill de lagos: rellenar con los cauces de los
+   rios ANTES de crear los lagos, para que el lago no suba por el rio. */
+void  g3d_fluid_block_reset(void);
+void  g3d_fluid_block_river(const float *pts_xyz, int n, float width);
 /* Rios por camino de puntos (agua + flujo + cascadas). */
 int   g3d_river_add(const float *pts_xyz, int n, float width);
 int   g3d_river_begin(float width, float rise);
 int   g3d_river_point(float x, float z);
 int   g3d_river_end(void);
+int   g3d_river_block(void);   /* rasteriza el rio acumulado en la mascara de bloqueo */
 
 /* Register a runtime-built terrain mesh as the collision heightfield (so rigid
    bodies / characters rest on a g3d_primitive_terrain + g3d_terrain_load relief,

@@ -201,6 +201,8 @@ int64_t g3d_water_ripple_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_add_ripple_source_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_clear_ripple_sources_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_splash_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_fluid_block_reset_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_river_block_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_mirror_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_mirror_set_flip_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_mirror_set_tint_bgd(INSTANCE *my, int64_t *params);
@@ -547,6 +549,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_LAKE_SPILL_LEVEL", "FF", TYPE_FLOAT, g3d_lake_spill_level_bgd),
     FUNC("G3D_RIVER_BEGIN", "FF", TYPE_INT, g3d_river_begin_bgd),
     FUNC("G3D_RIVER_POINT", "FF", TYPE_INT, g3d_river_point_bgd),
+    FUNC("G3D_FLUID_BLOCK_RESET", "", TYPE_INT, g3d_fluid_block_reset_bgd),
+    FUNC("G3D_RIVER_BLOCK", "", TYPE_INT, g3d_river_block_bgd),
     FUNC("G3D_RIVER_END", "", TYPE_INT, g3d_river_end_bgd),
     FUNC("G3D_WATER_SET_WAVES", "FFF", TYPE_INT, g3d_water_set_waves_bgd),
     FUNC("G3D_WATER_SET_COLOR", "FFFFFF", TYPE_INT, g3d_water_set_color_bgd),

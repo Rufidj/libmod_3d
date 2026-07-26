@@ -515,15 +515,68 @@ int g3d_scene_load(const char *file) {
    y el juego generado. Necesitan que el terreno este registrado como
    colisionador (g3d_set_terrain_collider), que es de donde sale el heightfield.
    --------------------------------------------------------------------------- */
+/* Mascara de celdas que BLOQUEAN el flood-fill de los lagos (los cauces de los
+   rios): asi el lago no sube por el rio y el rio conserva su propia agua. La
+   rellena el llamador (editor/juego) con g3d_fluid_block_river ANTES de crear
+   los lagos. NULL = sin bloqueo (comportamiento anterior). */
+static unsigned char *g_fluid_block = NULL;
+static int g_fluid_block_side = 0;
+
+void g3d_fluid_block_reset(void) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) {
+        free(g_fluid_block); g_fluid_block = NULL; g_fluid_block_side = 0; return;
+    }
+    if (g_fluid_block_side != side) {
+        free(g_fluid_block);
+        g_fluid_block = (unsigned char *)calloc((size_t)side * side, 1);
+        g_fluid_block_side = g_fluid_block ? side : 0;
+    } else if (g_fluid_block) {
+        memset(g_fluid_block, 0, (size_t)side * side);
+    }
+}
+
+/* Marca en la mascara las celdas del cauce de un rio (una banda de ancho `width`
+   a lo largo del camino de puntos x,y,z), para que los lagos no lo inunden. */
+void g3d_fluid_block_river(const float *pts_xyz, int n, float width) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return;
+    if (!g_fluid_block || g_fluid_block_side != side || !pts_xyz || n < 2) return;
+    int grid = side - 1;
+    float cell = ws / (float)grid;
+    float r = width * 0.5f + cell;          /* un pelin mas ancho que el cauce */
+    int ir = (int)(r / cell) + 1;
+    for (int s = 0; s < n - 1; s++) {
+        float ax = pts_xyz[s*3], az = pts_xyz[s*3+2];
+        float bx = pts_xyz[(s+1)*3], bz = pts_xyz[(s+1)*3+2];
+        float dx = bx-ax, dz = bz-az; float L = sqrtf(dx*dx+dz*dz); if (L < 1e-4f) L = 1e-4f;
+        int steps = (int)(L / (cell*0.5f)) + 1;
+        for (int k = 0; k <= steps; k++) {
+            float t = (float)k/steps, x = ax+dx*t, z = az+dz*t;
+            int ci = (int)lrintf((x/ws + 0.5f)*grid);
+            int cj = (int)lrintf((z/ws + 0.5f)*grid);
+            for (int jj = cj-ir; jj <= cj+ir; jj++)
+            for (int ii = ci-ir; ii <= ci+ir; ii++) {
+                if (ii < 0 || jj < 0 || ii >= side || jj >= side) continue;
+                float wx = ((float)ii/grid - 0.5f)*ws, wz = ((float)jj/grid - 0.5f)*ws;
+                float ex = wx-x, ez = wz-z;
+                if (ex*ex + ez*ez <= r*r) g_fluid_block[jj*side + ii] = 1;
+            }
+        }
+    }
+}
+
 int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return -1;
     unsigned char *filled = (unsigned char *)calloc((size_t)side * side, 1);
     float d = depth;
+    const unsigned char *blk = (g_fluid_block && g_fluid_block_side == side) ? g_fluid_block : NULL;
     /* footprint = celdas por debajo del nivel; superficie al mismo nivel;
-       radio maximo = todo el mapa (que llene la depresion entera). */
+       radio maximo = todo el mapa (que llene la depresion entera). Los cauces de
+       los rios (blk) actuan de muro para que el lago no suba por ellos. */
     G3DMesh *lm = g3d_fluid_build_lake(H, side, ws, seed_x, seed_z,
-                                       surface_y, surface_y, NULL, filled, &d, ws);
+                                       surface_y, surface_y, blk, filled, &d, ws);
     if (filled) free(filled);
     if (!lm) return -1;
     return g3d_fluid_add_mesh(lm, d);
@@ -534,7 +587,8 @@ int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
 float g3d_lake_spill_level(float seed_x, float seed_z) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0.0f;
-    return g3d_fluid_spill_level(H, side, ws, seed_x, seed_z, NULL);
+    const unsigned char *blk = (g_fluid_block && g_fluid_block_side == side) ? g_fluid_block : NULL;
+    return g3d_fluid_spill_level(H, side, ws, seed_x, seed_z, blk);
 }
 
 /* ---------------------------------------------------------------------------
@@ -582,3 +636,7 @@ int g3d_river_point(float x, float z) {
     return 1;
 }
 int g3d_river_end(void) { return g3d_river_add(g_river_pts, g_river_n, g_river_w); }
+
+/* Marca el rio acumulado (begin/point) en la mascara de bloqueo, SIN construirlo,
+   para llamarlo antes de crear los lagos (que asi no lo inunden). */
+int g3d_river_block(void) { g3d_fluid_block_river(g_river_pts, g_river_n, g_river_w); return 1; }
