@@ -658,11 +658,21 @@ int g3d_river_add(const float *pts_xyz, int n, float width) {
     float depth = 1.0f;
     G3DMesh *rm = g3d_fluid_build_river(pts_xyz, n, H, side, ws, width, &depth);
     if (rm) g3d_fluid_add_mesh(rm, depth);              /* superficie del cauce   */
-    /* La capa de flujo (g3d_flow_add_path) se veia como una cinta gris
-       geometrica sobre la hierba. El rio se dibuja con la superficie de
-       fluido (agua de verdad, como los lagos) dentro del lecho excavado. */
-    g3d_river_add_waterfalls(pts_xyz, n, H, side, ws, width); /* cascadas         */
+    /* Las CASCADAS se anaden aparte (g3d_river_add_falls) con el camino COMPLETO,
+       no el recortado: asi una caida que aterriza en un lago no desaparece al
+       recortar la superficie del rio bajo el lago. */
     return rm ? 0 : -1;
+}
+
+/* Anade solo las cascadas (laminas de flujo) del camino dado. Se llama con el
+   camino COMPLETO del rio (sin recortar por lagos), para que las caidas que
+   terminan en un lago sigan apareciendo. */
+int g3d_river_add_falls(const float *pts_xyz, int n, float width) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2 || n < 2) return -1;
+    if (width < 0.1f) width = 3.0f;
+    g3d_river_add_waterfalls(pts_xyz, n, H, side, ws, width);
+    return 0;
 }
 
 #define G3D_RIVER_MAXPTS 256
@@ -693,3 +703,7 @@ int g3d_river_end(void) { return g3d_river_add(g_river_pts, g_river_n, g_river_w
 /* Marca el rio acumulado (begin/point) en la mascara de bloqueo, SIN construirlo,
    para llamarlo antes de crear los lagos (que asi no lo inunden). */
 int g3d_river_block(void) { g3d_fluid_block_river(g_river_pts, g_river_n, g_river_w); return 1; }
+
+/* Anade las cascadas del rio acumulado (begin/point). Se llama con el camino
+   COMPLETO, tras crear la superficie (recortada) con otra secuencia. */
+int g3d_river_falls(void) { return g3d_river_add_falls(g_river_pts, g_river_n, g_river_w); }

@@ -1550,6 +1550,10 @@ int64_t g3d_river_block_bgd(INSTANCE *my, int64_t *params) {
     (void)params; return g3d_river_block();
 }
 
+int64_t g3d_river_falls_bgd(INSTANCE *my, int64_t *params) {
+    (void)params; return g3d_river_falls();
+}
+
 /* Mirror */
 int64_t g3d_mirror_create_bgd(INSTANCE *my, int64_t *params) {
     float px = *(float *)&params[0];

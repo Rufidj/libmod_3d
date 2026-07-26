@@ -49,6 +49,8 @@ int   g3d_river_begin(float width, float rise);
 int   g3d_river_point(float x, float z);
 int   g3d_river_end(void);
 int   g3d_river_block(void);   /* rasteriza el rio acumulado en la mascara de bloqueo */
+int   g3d_river_add_falls(const float *pts_xyz, int n, float width); /* solo cascadas */
+int   g3d_river_falls(void);   /* cascadas del rio acumulado (camino completo) */
 
 /* Register a runtime-built terrain mesh as the collision heightfield (so rigid
    bodies / characters rest on a g3d_primitive_terrain + g3d_terrain_load relief,

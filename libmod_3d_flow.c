@@ -248,18 +248,31 @@ int g3d_flow_add(float tx, float ty, float tz, float bx, float by, float bz,
     turb = 0.35f + 0.65f * turb;
 
     float hw = width * 0.5f;
+    /* Direccion HORIZONTAL de la caida (hacia donde vuela el agua) y su
+       perpendicular (el ancho de la lamina). El ancho va perpendicular a la caida
+       (no siempre en X), y la lamina se EMPUJA hacia adelante segun baja, para que
+       cuelgue DELANTE del talud y el terreno no la tape. */
+    float dxh = bx - tx, dzh = bz - tz;
+    float hlen = sqrtf(dxh*dxh + dzh*dzh);
+    float hx, hz;
+    if (hlen > 0.05f) { hx = dxh/hlen; hz = dzh/hlen; }
+    else { hx = 0.0f; hz = 1.0f; }          /* caida vertical pura: orientacion por defecto */
+    float px = -hz, pz = hx;                  /* perpendicular en XZ = ancho */
+    float fwd = width * 0.7f + 0.5f;          /* cuanto se separa del talud en la base */
     int k = 0;
     for (int j = 0; j < vrows; j++) {
         float fv = (float)j / (float)rows;
         float cx = tx + (bx - tx) * fv;
         float cy = ty + (by - ty) * fv;
         float cz = tz + (bz - tz) * fv;
+        cx += hx * fwd * fv;                  /* arco hacia adelante (mas en la base) */
+        cz += hz * fwd * fv;
         for (int i = 0; i < vcols; i++) {
             float fu = (float)i / (float)cols;
             float ox = (fu - 0.5f) * 2.0f * hw;
-            vdata[k++] = cx + ox;
+            vdata[k++] = cx + px * ox;
             vdata[k++] = cy;
-            vdata[k++] = cz;
+            vdata[k++] = cz + pz * ox;
             vdata[k++] = fu;
             vdata[k++] = fv;
             vdata[k++] = turb;
