@@ -1991,7 +1991,8 @@ int64_t g3d_flow_set_speed_bgd(INSTANCE *my, int64_t *params) {
 
 int64_t g3d_waterfall_add_bgd(INSTANCE *my, int64_t *params) {
     return g3d_waterfall_add(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
-                             *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+                             *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
+                             *(float *)&params[6]);
 }
 
 int64_t g3d_flow_clear_bgd(INSTANCE *my, int64_t *params) {

@@ -653,7 +653,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_FLOW_SET_COLOR", "FFF", TYPE_INT, g3d_flow_set_color_bgd),
     FUNC("G3D_FLOW_SET_FOAM", "F", TYPE_INT, g3d_flow_set_foam_bgd),
     FUNC("G3D_FLOW_SET_SPEED", "F", TYPE_INT, g3d_flow_set_speed_bgd),
-    FUNC("G3D_WATERFALL_ADD", "FFFFFF", TYPE_INT, g3d_waterfall_add_bgd),
+    FUNC("G3D_WATERFALL_ADD", "FFFFFFF", TYPE_INT, g3d_waterfall_add_bgd),
     FUNC("G3D_FLOW_CLEAR", "", TYPE_INT, g3d_flow_clear_bgd),
     FUNC("G3D_FLOW_SET_CLIP", "F", TYPE_INT, g3d_flow_set_clip_bgd),
     FUNC("G3D_PARTICLES_CREATE", "FFFFFFFFFFFFFI", TYPE_INT, g3d_particles_create_bgd),

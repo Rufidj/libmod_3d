@@ -136,6 +136,7 @@ static struct {
     float color[3];
     float foam;             /* multiplicador de espuma actual (para capturar) */
     float speed_mul;        /* multiplicador de velocidad actual */
+    float arc;              /* comba hacia adelante de la proxima lamina (0 = recta) */
     int clip_on;
     float clip_y;
     FlowQuad quads[G3D_MAX_FLOWS];
@@ -167,6 +168,8 @@ void g3d_flow_set_color(float r, float g, float b) {
 /* Intensidad de espuma y multiplicador de velocidad de la PROXIMA cascada. */
 void g3d_flow_set_foam(float foam) { g_flow.foam = foam; }
 void g3d_flow_set_speed(float mul) { g_flow.speed_mul = mul > 0.0f ? mul : 1.0f; }
+/* Comba hacia adelante (arco) de la PROXIMA lamina. 0 = recta. */
+void g3d_flow_set_arc(float arc) { g_flow.arc = arc; }
 
 #ifndef VITA
 /* Upload an interleaved (xyz, uv, turb) vertex grid as a flow quad. Returns id. */
@@ -269,6 +272,9 @@ int g3d_flow_add(float tx, float ty, float tz, float bx, float by, float bz,
         float cy = ty + (by - ty) * fv;
         float cz = tz + (bz - tz) * fv;
         float pushf = fwd * (0.55f + 0.45f * fv);   /* algo de separacion ya arriba */
+        /* ARCO: comba en parabola (max en el centro), en la direccion de la caida,
+           para que el agua salga del borde y caiga curvandose en vez de recta. */
+        pushf += g_flow.arc * 4.0f * fv * (1.0f - fv);
         cx += hx * pushf;
         cz += hz * pushf;
         for (int i = 0; i < vcols; i++) {
@@ -294,7 +300,7 @@ int g3d_flow_add(float tx, float ty, float tz, float bx, float by, float bz,
    (bx,?,bz). La Y de la base se pone en la SUPERFICIE del agua si hay lago/rio
    debajo (para fundirse con el), si no en el terreno. Pone una honda de
    salpicadura al pie. Usa el estilo de flujo actual (color/textura/espuma/vel). */
-int g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float width) {
+int g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float width, float arc) {
     float by = ty;
 #ifndef VITA
     /* base: terreno en (bx,bz), o la superficie del agua si la hay (mas alta) */
@@ -306,7 +312,9 @@ int g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float wi
 #endif
     float drop = ty - by; if (drop < 0.1f) drop = 0.1f;
     float til = drop * 0.4f; if (til < 1.0f) til = 1.0f;
+    g3d_flow_set_arc(arc);
     int id = g3d_flow_add(tx, ty + 0.3f, tz, bx, by, bz, width, 2.5f, til);
+    g3d_flow_set_arc(0.0f);                       /* no afectar a otras laminas */
     g3d_water_add_ripple_source(bx, bz, 1.3f);   /* salpicadura en la poza */
     return id;
 }

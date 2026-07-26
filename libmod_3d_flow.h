@@ -47,9 +47,10 @@ void g3d_flow_set_texture(unsigned int gl_handle);
 void g3d_flow_set_color(float r, float g, float b);
 void g3d_flow_set_foam(float foam);   /* intensidad de espuma de la proxima cascada */
 void g3d_flow_set_speed(float mul);   /* multiplicador de velocidad de la proxima cascada */
+void g3d_flow_set_arc(float arc);     /* comba (arco) de la proxima lamina; 0 = recta */
 /* Cascada colocada a mano: del borde (tx,ty,tz) a la base (bx,bz); la base
-   aterriza en el agua si la hay. Devuelve id de la lamina. */
-int  g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float width);
+   aterriza en el agua si la hay. arc = comba hacia adelante. Devuelve id. */
+int  g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float width, float arc);
 
 /* Clip flow fragments below world height `y` (e.g. the water level, so a
    waterfall vanishes at the surface instead of showing underwater). */
