@@ -367,18 +367,30 @@ int g3d_flow_add_path(const float *pts, int n, float width, float y_offset,
 void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
                               int side, float ws, float width) {
     if (!pts || n < 2 || !H) return;
+    /* Muestrea DENSO a lo largo del cauce (no solo entre los puntos clicados, que
+       pueden estar lejos): asi se detecta un acantilado donde sea que el rio lo
+       cruce. En cada tramo con pendiente fuerte se anade una lamina de agua cayendo
+       (g3d_flow_add), que el paso de flujo dibuja con espuma segun la verticalidad. */
+    float step = width * 0.6f; if (step < 1.0f) step = 1.0f;
     for (int i = 0; i < n - 1; i++) {
-        float tx = pts[i * 3], tz = pts[i * 3 + 2];
+        float ax = pts[i * 3], az = pts[i * 3 + 2];
         float bx = pts[(i + 1) * 3], bz = pts[(i + 1) * 3 + 2];
-        float ty = g3d_heightfield_height(H, side, ws, tx, tz);
-        float by = g3d_heightfield_height(H, side, ws, bx, bz);
-        float drop = ty - by;
-        float dx = bx - tx, dz = bz - tz;
-        float horiz = sqrtf(dx * dx + dz * dz) + 1e-4f;
-        /* steep enough to read as a fall (slope > ~45 deg and > 2 units) */
-        if (drop > 2.0f && drop > horiz) {
-            float tiling = drop * 0.4f; if (tiling < 1.0f) tiling = 1.0f;
-            g3d_flow_add(tx, ty + 0.3f, tz, bx, by - 0.3f, bz, width, 2.5f, tiling);
+        float dx = bx - ax, dz = bz - az;
+        float seglen = sqrtf(dx * dx + dz * dz);
+        int sub = (int)(seglen / step); if (sub < 1) sub = 1;
+        for (int s = 0; s < sub; s++) {
+            float t0 = (float)s / sub, t1 = (float)(s + 1) / sub;
+            float x0 = ax + dx*t0, z0 = az + dz*t0;
+            float x1 = ax + dx*t1, z1 = az + dz*t1;
+            float y0 = g3d_heightfield_height(H, side, ws, x0, z0);
+            float y1 = g3d_heightfield_height(H, side, ws, x1, z1);
+            float drop = y0 - y1;
+            float horiz = seglen / (float)sub + 1e-4f;
+            /* pendiente fuerte (> ~30 deg y > 1.2 unidades) -> cascada */
+            if (drop > 1.2f && drop > horiz * 0.6f) {
+                float tiling = drop * 0.4f; if (tiling < 1.0f) tiling = 1.0f;
+                g3d_flow_add(x0, y0 + 0.3f, z0, x1, y1 - 0.3f, z1, width, 2.5f, tiling);
+            }
         }
     }
 }
