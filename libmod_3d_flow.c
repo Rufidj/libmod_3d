@@ -427,7 +427,8 @@ static void trace_fall_base(const float *H, int side, float ws, float width,
                             float *ox, float *oy, float *oz) {
     float st = width * 0.4f; if (st < 0.5f) st = 0.5f;
     float cx = x, cy = y, cz = z;
-    for (int k = 0; k < 150; k++) {
+    int wasSteep = 0;
+    for (int k = 0; k < 200; k++) {
         /* si hay agua por encima del terreno aqui, la caida aterriza en ella */
         float wl = g3d_water_level_at(cx, cz);
         if (wl > cy) { cy = wl; break; }
@@ -440,7 +441,10 @@ static void trace_fall_base(const float *H, int side, float ws, float width,
             float drop = cy - ny;
             if (drop > bestDrop) { bestDrop = drop; bnx = nx; bnz = nz; bny = ny; }
         }
-        if (bestDrop < st * 0.12f) break;   /* ya casi plano (~7 deg) -> base del acantilado */
+        float slope = bestDrop / st;                 /* ~tan(pendiente) */
+        if (slope > 0.6f) wasSteep = 1;              /* ya en el acantilado (>~30 deg) */
+        if (wasSteep && slope < 0.30f) break;        /* tras el acantilado, se aplana -> base */
+        if (slope < 0.04f) break;                    /* seguridad: terreno plano */
         cx = bnx; cy = bny; cz = bnz;
     }
     *ox = cx; *oy = cy; *oz = cz;
@@ -484,9 +488,12 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
                        cuesta abajo hasta la BASE real y emite UNA lamina. */
                     float bx2, by2, bz2;
                     trace_fall_base(H, side, ws, width, topx, topy, topz, &bx2, &by2, &bz2);
-                    float dropT = topy - by2; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
-                    g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
-                    g3d_water_add_ripple_source(bx2, bz2, 1.3f);
+                    float dropT = topy - by2;
+                    if (dropT > 1.5f) {   /* caida de verdad, no una rampita */
+                        float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
+                        g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
+                        g3d_water_add_ripple_source(bx2, bz2, 1.3f);
+                    }
                     inRun = 0;
                 }
             }
@@ -496,9 +503,12 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
     if (inRun) {   /* la caida sigue hasta el final del rio: traza hasta la base */
         float bx2, by2, bz2;
         trace_fall_base(H, side, ws, width, topx, topy, topz, &bx2, &by2, &bz2);
-        float dropT = topy - by2; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
-        g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
-        g3d_water_add_ripple_source(bx2, bz2, 1.3f);
+        float dropT = topy - by2;
+        if (dropT > 1.5f) {
+            float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
+            g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
+            g3d_water_add_ripple_source(bx2, bz2, 1.3f);
+        }
     }
 }
 
