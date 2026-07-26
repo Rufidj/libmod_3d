@@ -137,37 +137,57 @@ G3DMesh *g3d_fluid_build_lake(const float *H, int side, float ws,
         seed = found;
     }
 
-    /* Flood-fill connected vertices below `level`. With max_radius > 0 the fill is
-       bounded to a disc around the seed (in world units), so on open/bowl terrain
-       it forms a local pool instead of flooding the whole map. */
+    /* Llenado de CUENCA (watershed), automatico: el lago llena la depresion del
+       seed hasta el punto de DESBORDE y NO se escapa por el hueco. Dijkstra
+       min-max: best[c] = altura de agua minima para llegar a c desde el seed (el
+       maximo del terreno a lo largo del mejor camino). La primera celda de
+       borde/disco que se asienta da el nivel de desborde (spill). La CUENCA =
+       celdas con best < spill (las ENCERRADAS por el contorno de desborde); el
+       cauce de escape cuesta abajo queda a best>=spill, asi que NO se llena. */
     int ssi = seed % side, ssj = seed / side;
     float maxCells = (max_radius > 0.0f) ? max_radius / (ws / (float)grid) : 0.0f;
     float maxCells2 = maxCells * maxCells;
-    char *in = (char *)calloc((size_t)N, 1);
-    int *stack = (int *)malloc((size_t)N * sizeof(int));
-    int sp = 0, count = 0;
-    float minh = H[seed];
-    stack[sp++] = seed; in[seed] = 1;
-    while (sp > 0) {
-        int c = stack[--sp];
-        count++;
-        if (H[c] < minh) minh = H[c];
-        int i = c % side, j = c / side;
-        int nb[4] = { c - 1, c + 1, c - side, c + side };
+    float *best = (float *)malloc((size_t)N * sizeof(float));
+    char *done2 = (char *)calloc((size_t)N, 1);
+    for (int k = 0; k < N; k++) best[k] = 1e30f;
+    Heap hp = {0};
+    best[seed] = H[seed]; heap_push(&hp, H[seed], seed);
+    float spillv = 1e30f, keyv; int cc;
+    while (heap_pop(&hp, &keyv, &cc)) {
+        if (done2[cc]) continue;
+        done2[cc] = 1;
+        int i = cc % side, j = cc / side;
+        int border = (i == 0 || j == 0 || i == grid || j == grid);
+        if (!border && maxCells2 > 0.0f) {
+            float di = (float)(i - ssi), dj = (float)(j - ssj);
+            if (di * di + dj * dj > maxCells2) border = 1;   /* limite del disco = borde */
+        }
+        if (border) { spillv = keyv; break; }                /* desborde -> paramos */
+        int nb[4] = { cc - 1, cc + 1, cc - side, cc + side };
         int ni[4] = { i - 1, i + 1, i, i };
         int nj[4] = { j, j, j - 1, j + 1 };
         for (int d = 0; d < 4; d++) {
             if (ni[d] < 0 || nj[d] < 0 || ni[d] > grid || nj[d] > grid) continue;
             int n = nb[d];
-            if (blocked && blocked[n]) continue;   /* don't flood into a river */
-            if (maxCells2 > 0.0f) {
-                float di2 = (float)(ni[d] - ssi), dj2 = (float)(nj[d] - ssj);
-                if (di2 * di2 + dj2 * dj2 > maxCells2) continue;   /* outside the disc */
-            }
-            if (!in[n] && H[n] < level) { in[n] = 1; stack[sp++] = n; }
+            if (blocked && blocked[n]) continue;             /* rio = muro */
+            float nl = keyv > H[n] ? keyv : H[n];
+            if (nl < best[n]) { best[n] = nl; heap_push(&hp, nl, n); }
         }
     }
-    free(stack);
+    free(hp.a); free(done2);
+    /* La superficie del agua no puede pasar del desborde (si no, rebosaria). */
+    float waterY = surfaceY;
+    if (waterY > spillv - 0.05f) waterY = spillv - 0.05f;
+    char *in = (char *)calloc((size_t)N, 1);
+    int count = 0;
+    float minh = H[seed];
+    for (int k = 0; k < N; k++) {
+        if (best[k] < spillv && H[k] < waterY) {   /* dentro de la cuenca y bajo el agua */
+            in[k] = 1; count++;
+            if (H[k] < minh) minh = H[k];
+        }
+    }
+    free(best);
     if (out_filled)
         for (int k = 0; k < N; k++) if (in[k]) out_filled[k] = 1;
 
@@ -213,9 +233,9 @@ G3DMesh *g3d_fluid_build_lake(const float *H, int side, float ws,
             float pz[4] = { zj, zj,  zj1, zj1 };
             int base = v;
             for (int k = 0; k < 4; k++) {
-                float sd = surfaceY - H[cc[k]]; if (sd < 0.0f) sd = 0.0f;   /* fallback */
+                float sd = waterY - H[cc[k]]; if (sd < 0.0f) sd = 0.0f;   /* fallback */
                 verts[v].position[0] = px[k];
-                verts[v].position[1] = surfaceY;
+                verts[v].position[1] = waterY;
                 verts[v].position[2] = pz[k];
                 verts[v].normal[0] = 0; verts[v].normal[1] = 1; verts[v].normal[2] = 0;
                 verts[v].texcoord[0] = sd; verts[v].texcoord[1] = 0;
@@ -231,7 +251,7 @@ G3DMesh *g3d_fluid_build_lake(const float *H, int side, float ws,
     G3DMesh *mesh = g3d_mesh_create("lake", verts, (uint32_t)v, idx, (uint32_t)ic);
     free(verts); free(idx);
     if (mesh) g3d_mesh_upload_gpu(mesh);
-    if (out_depth) { float d = surfaceY - minh; *out_depth = d > 0.0f ? d : 0.0f; }
+    if (out_depth) { float d = waterY - minh; *out_depth = d > 0.0f ? d : 0.0f; }
     return mesh;
 }
 
