@@ -45,6 +45,8 @@ void g3d_flow_set_texture(unsigned int gl_handle);
 
 /* Water colour shared by all flows. */
 void g3d_flow_set_color(float r, float g, float b);
+void g3d_flow_set_foam(float foam);   /* intensidad de espuma de la proxima cascada */
+void g3d_flow_set_speed(float mul);   /* multiplicador de velocidad de la proxima cascada */
 
 /* Clip flow fragments below world height `y` (e.g. the water level, so a
    waterfall vanishes at the surface instead of showing underwater). */

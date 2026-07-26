@@ -282,6 +282,8 @@ int64_t g3d_flow_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_river_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_color_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_flow_set_foam_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_flow_set_speed_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_clip_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_particles_create_bgd(INSTANCE *my, int64_t *params);
@@ -646,6 +648,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_FLOW_ADD_RIVER", "IFFFFFFFF", TYPE_INT, g3d_flow_add_river_bgd),
     FUNC("G3D_FLOW_SET_TEXTURE", "I", TYPE_INT, g3d_flow_set_texture_bgd),
     FUNC("G3D_FLOW_SET_COLOR", "FFF", TYPE_INT, g3d_flow_set_color_bgd),
+    FUNC("G3D_FLOW_SET_FOAM", "F", TYPE_INT, g3d_flow_set_foam_bgd),
+    FUNC("G3D_FLOW_SET_SPEED", "F", TYPE_INT, g3d_flow_set_speed_bgd),
     FUNC("G3D_FLOW_CLEAR", "", TYPE_INT, g3d_flow_clear_bgd),
     FUNC("G3D_FLOW_SET_CLIP", "F", TYPE_INT, g3d_flow_set_clip_bgd),
     FUNC("G3D_PARTICLES_CREATE", "FFFFFFFFFFFFFI", TYPE_INT, g3d_particles_create_bgd),

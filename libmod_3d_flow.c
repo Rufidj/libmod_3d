@@ -61,6 +61,7 @@ static const char *flow_frag =
     "uniform vec3 uLightColor;\n"
     "uniform int uClipOn;\n"
     "uniform float uClipY;\n"
+    "uniform float uFoam;\n"          /* multiplicador de espuma por cascada */
     "out vec4 FragColor;\n"
     /* --- ruido de valor procedural (no depende de textura) --- */
     "float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\n"
@@ -78,6 +79,13 @@ static const char *flow_frag =
     "    float j1 = fbm(vec2(across*7.0, down*sc*1.6 - t*3.0));\n"
     "    float j2 = fbm(vec2(across*15.0 + 3.7, down*sc*3.0 - t*5.0));\n"
     "    float streak = mix(j1, j2, 0.5);\n"
+    // Textura propia de la cascada (opcional): se desplaza cayendo y aporta detalle
+    "    vec3 texCol = vec3(1.0);\n"
+    "    if (uHasTex == 1) {\n"
+    "        vec3 tx = texture(uTex, vec2(across*2.0, down*sc - t*2.0)).rgb;\n"
+    "        streak = mix(streak, dot(tx, vec3(0.333)), 0.5);\n"
+    "        texCol = tx;\n"
+    "    }\n"
     // Lineas verticales finas (los hilos de agua) moduladas por el ruido.
     "    float threads = 0.5 + 0.5*sin(across*46.0 + j1*7.0);\n"
     // --- Borde ROTO: recorta los lados con ondulacion, para que NO sea una cinta plana ---
@@ -90,13 +98,14 @@ static const char *flow_frag =
     "    float baseFoam = smoothstep(0.72, 1.0, down);\n"
     "    float turbFoam = smoothstep(0.5, 1.0, vTurb) * 0.6;\n"
     "    float foam = max(max(topFoam, baseFoam), turbFoam);\n"
-    "    foam *= (0.45 + 0.75*streak);\n"
+    "    foam *= (0.45 + 0.75*streak) * max(uFoam, 0.0);\n"
     "    foam = clamp(foam, 0.0, 1.0);\n"
     // --- Color: agua profunda -> clara, y a blanco en la espuma ---
     "    vec3 deep = uColor;\n"
     "    vec3 shallow = clamp(uColor*1.6 + 0.15, 0.0, 1.0);\n"
     "    vec3 water = mix(deep, shallow, 0.35 + 0.5*streak);\n"
     "    water *= (0.8 + 0.35*threads);\n"                           // hilos de agua
+    "    if (uHasTex == 1) water = mix(water, water * texCol * 1.6, 0.5);\n"  // tinte de la textura
     "    vec3 col = mix(water, vec3(1.0), foam);\n"
     // brillo del sol en las crestas de los chorros
     "    col += uLightColor * pow(clamp(streak,0.0,1.0), 6.0) * 0.35;\n"
@@ -113,6 +122,10 @@ typedef struct {
     int index_count;
     float speed;
     float tiling;
+    /* estilo PROPIO de la cascada (capturado del global al crearla) */
+    float color[3];
+    unsigned int tex;
+    float foam;
     int active;
 } FlowQuad;
 
@@ -121,6 +134,8 @@ static struct {
     G3DShaderProgram *shader;
     unsigned int tex_handle;
     float color[3];
+    float foam;             /* multiplicador de espuma actual (para capturar) */
+    float speed_mul;        /* multiplicador de velocidad actual */
     int clip_on;
     float clip_y;
     FlowQuad quads[G3D_MAX_FLOWS];
@@ -137,6 +152,7 @@ static void flow_lazy_init(void) {
         return;
     g_flow.shader = g3d_shader_create(flow_vert, flow_frag);
     g_flow.color[0] = 0.6f; g_flow.color[1] = 0.78f; g_flow.color[2] = 0.85f;
+    g_flow.foam = 1.0f; g_flow.speed_mul = 1.0f;
     g_flow.initialized = 1;
 }
 
@@ -147,6 +163,10 @@ void g3d_flow_set_texture(unsigned int gl_handle) {
 void g3d_flow_set_color(float r, float g, float b) {
     g_flow.color[0] = r; g_flow.color[1] = g; g_flow.color[2] = b;
 }
+
+/* Intensidad de espuma y multiplicador de velocidad de la PROXIMA cascada. */
+void g3d_flow_set_foam(float foam) { g_flow.foam = foam; }
+void g3d_flow_set_speed(float mul) { g_flow.speed_mul = mul > 0.0f ? mul : 1.0f; }
 
 #ifndef VITA
 /* Upload an interleaved (xyz, uv, turb) vertex grid as a flow quad. Returns id. */
@@ -196,8 +216,12 @@ static int flow_register(const float *vdata, int vcount, int cols, int rows,
     glBindVertexArray(0);
 
     q->index_count = icount;
-    q->speed = speed;
+    q->speed = speed * (g_flow.speed_mul > 0.0f ? g_flow.speed_mul : 1.0f);
     q->tiling = tiling;
+    /* captura el estilo actual como propio de esta cascada */
+    q->color[0] = g_flow.color[0]; q->color[1] = g_flow.color[1]; q->color[2] = g_flow.color[2];
+    q->tex = g_flow.tex_handle;
+    q->foam = g_flow.foam > 0.0f ? g_flow.foam : 1.0f;
     q->active = 1;
     free(idata);
     return g_flow.count++;
@@ -458,15 +482,6 @@ void g3d_flow_render_pass(G3DCamera *camera, int flip_y) {
     g3d_shader_set_vec3(g_flow.shader, "uLightDir", ldir);
     g3d_shader_set_vec3(g_flow.shader, "uLightColor", lcol);
 
-    if (g_flow.tex_handle) {
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, g_flow.tex_handle);
-        g3d_shader_set_int(g_flow.shader, "uTex", 0);
-        g3d_shader_set_int(g_flow.shader, "uHasTex", 1);
-    } else {
-        g3d_shader_set_int(g_flow.shader, "uHasTex", 0);
-    }
-
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_DEPTH_TEST);
@@ -479,6 +494,17 @@ void g3d_flow_render_pass(G3DCamera *camera, int flip_y) {
             continue;
         g3d_shader_set_float(g_flow.shader, "uSpeed", q->speed);
         g3d_shader_set_float(g_flow.shader, "uTiling", q->tiling);
+        g3d_shader_set_float(g_flow.shader, "uFoam", q->foam);
+        g3d_shader_set_vec3(g_flow.shader, "uColor",
+                            vec3_make(q->color[0], q->color[1], q->color[2]));
+        if (q->tex) {
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, q->tex);
+            g3d_shader_set_int(g_flow.shader, "uTex", 0);
+            g3d_shader_set_int(g_flow.shader, "uHasTex", 1);
+        } else {
+            g3d_shader_set_int(g_flow.shader, "uHasTex", 0);
+        }
         glBindVertexArray(q->vao);
         glDrawElements(GL_TRIANGLES, q->index_count, GL_UNSIGNED_SHORT, 0);
     }

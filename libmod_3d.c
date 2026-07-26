@@ -1975,6 +1975,16 @@ int64_t g3d_flow_set_color_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_flow_set_foam_bgd(INSTANCE *my, int64_t *params) {
+    g3d_flow_set_foam(*(float *)&params[0]);
+    return 1;
+}
+
+int64_t g3d_flow_set_speed_bgd(INSTANCE *my, int64_t *params) {
+    g3d_flow_set_speed(*(float *)&params[0]);
+    return 1;
+}
+
 int64_t g3d_flow_clear_bgd(INSTANCE *my, int64_t *params) {
     g3d_flow_clear();
     return 1;
