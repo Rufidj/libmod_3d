@@ -9,6 +9,7 @@
 #include "libmod_3d_chunkterrain.h"   /* g3d_heightfield_height */
 #include "libmod_3d_scene.h"
 #include "libmod_3d_light.h"
+#include "libmod_3d_water.h"   /* g3d_water_add_ripple_source (salpicadura al pie) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -46,7 +47,7 @@ static const char *flow_vert =
 
 static const char *flow_frag =
     "#version 330 core\n"
-    "in vec2 vUV;\n"
+    "in vec2 vUV;\n"                  /* x across 0..1, y DOWN the fall 0..1 */
     "in float vTurb;\n"
     "in vec3 vWorldPos;\n"
     "uniform sampler2D uTex;\n"
@@ -61,35 +62,48 @@ static const char *flow_frag =
     "uniform int uClipOn;\n"
     "uniform float uClipY;\n"
     "out vec4 FragColor;\n"
+    /* --- ruido de valor procedural (no depende de textura) --- */
+    "float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }\n"
+    "float vnoise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);\n"
+    "  float a=hash(i), b=hash(i+vec2(1,0)), c=hash(i+vec2(0,1)), d=hash(i+vec2(1,1));\n"
+    "  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y); }\n"
+    "float fbm(vec2 p){ float s=0.0, a=0.5; for(int i=0;i<3;i++){ s+=a*vnoise(p); p*=2.0; a*=0.5;} return s; }\n"
     "void main() {\n"
     "    if (uClipOn == 1 && vWorldPos.y < uClipY) discard;\n"
-    "    /* Water surface normal (up), bumped by the scrolling texture for ripples */\n"
-    "    vec3 N = vec3(0.0, 1.0, 0.0);\n"
-    "    float detail = 0.5;\n"
-    "    if (uHasTex == 1) {\n"
-    "        vec2 a = vec2(vUV.x * 2.0, vUV.y * uTiling - uTime * uSpeed);\n"
-    "        vec2 b = vec2(vUV.x * 2.0 + 0.3, vUV.y * uTiling * 1.7 - uTime * uSpeed * 1.5);\n"
-    "        vec3 t1 = texture(uTex, a).rgb;\n"
-    "        vec3 t2 = texture(uTex, b).rgb;\n"
-    "        detail = mix(dot(t1, vec3(0.3333)), dot(t2, vec3(0.3333)), 0.5);\n"
-    "        N = normalize(N + vec3((t1.r - 0.5) * 0.8, 0.0, (t2.b - 0.5) * 0.8));\n"
-    "    }\n"
-    "    /* Sea-like shading: Fresnel + sun specular, deep->shallow by view angle */\n"
-    "    vec3 V = normalize(uCameraPos - vWorldPos);\n"
-    "    float fres = pow(1.0 - max(dot(N, V), 0.0), 3.0);\n"
-    "    vec3 L = normalize(-uLightDir);\n"
-    "    vec3 R = reflect(-L, N);\n"
-    "    float spec = pow(max(dot(R, V), 0.0), 90.0);\n"
-    "    vec3 deep = uColor;\n"
-    "    vec3 shallow = clamp(uColor * 1.6 + 0.15, 0.0, 1.0);\n"
-    "    vec3 base = mix(deep, shallow, fres) * (0.8 + 0.4 * detail);\n"
-    "    /* Whitewater foam only where it's turbulent (steep drops) */\n"
-    "    float foam = smoothstep(0.55, 1.0, vTurb) * (0.4 + 0.6 * detail);\n"
+    "    float across = vUV.x;\n"
+    "    float down = vUV.y;\n"
+    "    float sc = max(uTiling, 1.0);\n"
+    "    float t = uTime * max(uSpeed, 0.5);\n"
+    // Chorros VERTICALES que caen: ruido estirado en Y, desplazandose rapido hacia abajo.
+    "    float j1 = fbm(vec2(across*7.0, down*sc*1.6 - t*3.0));\n"
+    "    float j2 = fbm(vec2(across*15.0 + 3.7, down*sc*3.0 - t*5.0));\n"
+    "    float streak = mix(j1, j2, 0.5);\n"
+    // Lineas verticales finas (los hilos de agua) moduladas por el ruido.
+    "    float threads = 0.5 + 0.5*sin(across*46.0 + j1*7.0);\n"
+    // --- Borde ROTO: recorta los lados con ondulacion, para que NO sea una cinta plana ---
+    "    float wob = fbm(vec2(down*sc*2.2 - t*3.5, across*3.0)) * 0.16;\n"
+    "    float ex = abs(across - 0.5) + wob;\n"
+    "    if (ex > 0.5) discard;\n"                                   // silueta irregular
+    "    float side = smoothstep(0.5, 0.4, ex);\n"                   // funde los lados
+    // --- Espuma: arriba (donde rompe el borde), abajo (impacto) y por turbulencia ---
+    "    float topFoam  = smoothstep(0.14, 0.0, down);\n"
+    "    float baseFoam = smoothstep(0.72, 1.0, down);\n"
+    "    float turbFoam = smoothstep(0.5, 1.0, vTurb) * 0.6;\n"
+    "    float foam = max(max(topFoam, baseFoam), turbFoam);\n"
+    "    foam *= (0.45 + 0.75*streak);\n"
     "    foam = clamp(foam, 0.0, 1.0);\n"
-    "    vec3 col = mix(base, vec3(1.0), foam) + uLightColor * spec * 0.9;\n"
-    "    float edge = smoothstep(0.0, 0.08, vUV.x) * smoothstep(1.0, 0.92, vUV.x);\n"
-    "    float alpha = mix(0.6, 0.95, max(fres, foam)) * (0.5 + 0.5 * edge);\n"
-    "    FragColor = vec4(col, alpha);\n"
+    // --- Color: agua profunda -> clara, y a blanco en la espuma ---
+    "    vec3 deep = uColor;\n"
+    "    vec3 shallow = clamp(uColor*1.6 + 0.15, 0.0, 1.0);\n"
+    "    vec3 water = mix(deep, shallow, 0.35 + 0.5*streak);\n"
+    "    water *= (0.8 + 0.35*threads);\n"                           // hilos de agua
+    "    vec3 col = mix(water, vec3(1.0), foam);\n"
+    // brillo del sol en las crestas de los chorros
+    "    col += uLightColor * pow(clamp(streak,0.0,1.0), 6.0) * 0.35;\n"
+    // --- Alfa: cuerpo semitransparente, opaco en la espuma, con hilos ---
+    "    float alpha = (0.5 + 0.45*streak) * side;\n"
+    "    alpha = max(alpha, foam * 0.95);\n"
+    "    FragColor = vec4(col, clamp(alpha, 0.0, 1.0));\n"
     "}\n";
 
 /* ---- state ------------------------------------------------------------- */
@@ -372,6 +386,7 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
        cruce. En cada tramo con pendiente fuerte se anade una lamina de agua cayendo
        (g3d_flow_add), que el paso de flujo dibuja con espuma segun la verticalidad. */
     float step = width * 0.6f; if (step < 1.0f) step = 1.0f;
+    int wasSteep = 0; float footx = 0.0f, footz = 0.0f;   /* pie de la caida actual */
     for (int i = 0; i < n - 1; i++) {
         float ax = pts[i * 3], az = pts[i * 3 + 2];
         float bx = pts[(i + 1) * 3], bz = pts[(i + 1) * 3 + 2];
@@ -386,13 +401,20 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
             float y1 = g3d_heightfield_height(H, side, ws, x1, z1);
             float drop = y0 - y1;
             float horiz = seglen / (float)sub + 1e-4f;
-            /* pendiente fuerte (> ~30 deg y > 1.2 unidades) -> cascada */
-            if (drop > 1.2f && drop > horiz * 0.6f) {
+            int steep = (drop > 1.2f && drop > horiz * 0.6f);   /* > ~30 deg y > 1.2u */
+            if (steep) {
                 float tiling = drop * 0.4f; if (tiling < 1.0f) tiling = 1.0f;
                 g3d_flow_add(x0, y0 + 0.3f, z0, x1, y1 - 0.3f, z1, width, 2.5f, tiling);
+                footx = x1; footz = z1;   /* recuerda el pie (punto mas bajo) */
             }
+            /* al terminar una caida (steep -> plano), salpicadura en el pie: una
+               fuente de honda permanente en el agua de abajo (el motor la re-emite). */
+            if (wasSteep && !steep)
+                g3d_water_add_ripple_source(footx, footz, 1.3f);
+            wasSteep = steep;
         }
     }
+    if (wasSteep) g3d_water_add_ripple_source(footx, footz, 1.3f);   /* caida hasta el final */
 }
 
 void g3d_flow_render_pass(G3DCamera *camera, int flip_y) {
