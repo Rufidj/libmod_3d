@@ -440,7 +440,7 @@ static void trace_fall_base(const float *H, int side, float ws, float width,
             float drop = cy - ny;
             if (drop > bestDrop) { bestDrop = drop; bnx = nx; bnz = nz; bny = ny; }
         }
-        if (bestDrop < st * 0.45f) break;   /* ya casi plano -> base del acantilado */
+        if (bestDrop < st * 0.12f) break;   /* ya casi plano (~7 deg) -> base del acantilado */
         cx = bnx; cy = bny; cz = bnz;
     }
     *ox = cx; *oy = cy; *oz = cz;
@@ -480,10 +480,10 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
                 int steep = (drop > 1.2f && drop > horiz * 0.6f);
                 if (steep && !inRun) { inRun = 1; topx = px; topy = py; topz = pz; }
                 if (!steep && inRun) {
-                    /* fin de la caida: sigue el acantilado hasta la BASE real y emite
-                       UNA lamina del borde superior al pie. */
+                    /* fin de la caida: desde el BORDE (topx) sigue el acantilado
+                       cuesta abajo hasta la BASE real y emite UNA lamina. */
                     float bx2, by2, bz2;
-                    trace_fall_base(H, side, ws, width, px, py, pz, &bx2, &by2, &bz2);
+                    trace_fall_base(H, side, ws, width, topx, topy, topz, &bx2, &by2, &bz2);
                     float dropT = topy - by2; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
                     g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
                     g3d_water_add_ripple_source(bx2, bz2, 1.3f);
@@ -495,7 +495,7 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
     }
     if (inRun) {   /* la caida sigue hasta el final del rio: traza hasta la base */
         float bx2, by2, bz2;
-        trace_fall_base(H, side, ws, width, px, py, pz, &bx2, &by2, &bz2);
+        trace_fall_base(H, side, ws, width, topx, topy, topz, &bx2, &by2, &bz2);
         float dropT = topy - by2; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
         g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
         g3d_water_add_ripple_source(bx2, bz2, 1.3f);
