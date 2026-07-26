@@ -310,6 +310,14 @@ G3DMesh *g3d_fluid_build_river(const float *pts, int n, const float *H,
     }
     int t = 0;
     for (int r = 0; r < nrows - 1; r++) {
+        /* Si entre esta fila y la siguiente hay una CAIDA fuerte, aqui va una
+           cascada (lamina de flujo aparte): NO se emite la superficie del rio en ese
+           tramo, para que no se mezcle el mesh plano del rio con la cascada. */
+        float drop = rc[r * 5 + 2] - rc[(r + 1) * 5 + 2];
+        float ddx = rc[(r + 1) * 5 + 0] - rc[r * 5 + 0];
+        float ddz = rc[(r + 1) * 5 + 1] - rc[r * 5 + 1];
+        float horiz = sqrtf(ddx * ddx + ddz * ddz) + 1e-4f;
+        if (drop > 1.2f && drop > horiz * 0.6f) continue;   /* hueco para la cascada */
         for (int i = 0; i < COLS; i++) {
             uint32_t a = (uint32_t)(r * vcols + i);
             uint32_t b = (uint32_t)(r * vcols + i + 1);
@@ -320,8 +328,9 @@ G3DMesh *g3d_fluid_build_river(const float *pts, int n, const float *H,
         }
     }
     free(rc);
+    if (t < 3) { free(verts); free(idx); if (out_depth) *out_depth = 0.0f; return NULL; }
 
-    G3DMesh *mesh = g3d_mesh_create("river", verts, (uint32_t)vcount, idx, (uint32_t)icount);
+    G3DMesh *mesh = g3d_mesh_create("river", verts, (uint32_t)vcount, idx, (uint32_t)t);
     free(verts); free(idx);
     if (mesh) g3d_mesh_upload_gpu(mesh);
     if (out_depth) { float dd = maxlev - minh; *out_depth = dd > 0.0f ? dd : 0.0f; }
