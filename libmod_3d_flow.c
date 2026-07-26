@@ -415,6 +415,33 @@ int g3d_flow_add_path(const float *pts, int n, float width, float y_offset,
 #endif
 }
 
+/* Desde el borde de una caida, sigue el terreno CUESTA ABAJO (maxima pendiente)
+   hasta la base del acantilado (donde se aplana) o hasta el agua. Asi la cascada
+   llega hasta abajo aunque el rio solo se asome al borde. Devuelve el pie. */
+static void trace_fall_base(const float *H, int side, float ws, float width,
+                            float x, float y, float z,
+                            float *ox, float *oy, float *oz) {
+    float st = width * 0.4f; if (st < 0.5f) st = 0.5f;
+    float cx = x, cy = y, cz = z;
+    for (int k = 0; k < 150; k++) {
+        /* si hay agua por encima del terreno aqui, la caida aterriza en ella */
+        float wl = g3d_water_level_at(cx, cz);
+        if (wl > cy) { cy = wl; break; }
+        /* busca la direccion (8) que mas baja */
+        float bestDrop = 0.0f, bnx = cx, bnz = cz, bny = cy;
+        for (int d = 0; d < 8; d++) {
+            float a = (float)d * 0.7853982f;   /* 45 deg */
+            float nx = cx + cosf(a) * st, nz = cz + sinf(a) * st;
+            float ny = g3d_heightfield_height(H, side, ws, nx, nz);
+            float drop = cy - ny;
+            if (drop > bestDrop) { bestDrop = drop; bnx = nx; bnz = nz; bny = ny; }
+        }
+        if (bestDrop < st * 0.45f) break;   /* ya casi plano -> base del acantilado */
+        cx = bnx; cy = bny; cz = bnz;
+    }
+    *ox = cx; *oy = cy; *oz = cz;
+}
+
 void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
                               int side, float ws, float width) {
     if (!pts || n < 2 || !H) return;
@@ -449,24 +476,25 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
                 int steep = (drop > 1.2f && drop > horiz * 0.6f);
                 if (steep && !inRun) { inRun = 1; topx = px; topy = py; topz = pz; }
                 if (!steep && inRun) {
-                    /* fin de la caida: emite UNA lamina del borde al pie (px,py,pz) */
-                    float wl = g3d_water_level_at(px, pz);
-                    float by = (wl > py) ? wl : py;              /* aterriza en el agua */
-                    float dropT = topy - by; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
-                    g3d_flow_add(topx, topy + 0.3f, topz, px, by, pz, width, 2.5f, til);
-                    g3d_water_add_ripple_source(px, pz, 1.3f);
+                    /* fin de la caida: sigue el acantilado hasta la BASE real y emite
+                       UNA lamina del borde superior al pie. */
+                    float bx2, by2, bz2;
+                    trace_fall_base(H, side, ws, width, px, py, pz, &bx2, &by2, &bz2);
+                    float dropT = topy - by2; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
+                    g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
+                    g3d_water_add_ripple_source(bx2, bz2, 1.3f);
                     inRun = 0;
                 }
             }
             px = x; py = y; pz = z; first = 0;
         }
     }
-    if (inRun) {   /* la caida llega hasta el final del rio */
-        float wl = g3d_water_level_at(px, pz);
-        float by = (wl > py) ? wl : py;
-        float dropT = topy - by; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
-        g3d_flow_add(topx, topy + 0.3f, topz, px, by, pz, width, 2.5f, til);
-        g3d_water_add_ripple_source(px, pz, 1.3f);
+    if (inRun) {   /* la caida sigue hasta el final del rio: traza hasta la base */
+        float bx2, by2, bz2;
+        trace_fall_base(H, side, ws, width, px, py, pz, &bx2, &by2, &bz2);
+        float dropT = topy - by2; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
+        g3d_flow_add(topx, topy + 0.3f, topz, bx2, by2, bz2, width, 2.5f, til);
+        g3d_water_add_ripple_source(bx2, bz2, 1.3f);
     }
 }
 
