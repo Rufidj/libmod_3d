@@ -423,35 +423,51 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
        cruce. En cada tramo con pendiente fuerte se anade una lamina de agua cayendo
        (g3d_flow_add), que el paso de flujo dibuja con espuma segun la verticalidad. */
     float step = width * 0.6f; if (step < 1.0f) step = 1.0f;
-    int wasSteep = 0; float footx = 0.0f, footz = 0.0f;   /* pie de la caida actual */
-    for (int i = 0; i < n - 1; i++) {
+    /* Recorre DENSO y acumula cada tramo de caida CONTIGUO en UNA sola lamina (del
+       borde superior al pie), en vez de muchos quads sueltos (que dejaban recortes).
+       El pie aterriza en la SUPERFICIE DEL AGUA si hay lago/rio abajo, para que se
+       mezcle bien; y se pone una honda de salpicadura ahi. */
+    int inRun = 0;
+    float topx = 0, topy = 0, topz = 0;         /* borde superior de la caida */
+    float px = 0, py = 0, pz = 0;               /* punto denso anterior */
+    int first = 1;
+    for (int i = 0; i < n; i++) {
         float ax = pts[i * 3], az = pts[i * 3 + 2];
-        float bx = pts[(i + 1) * 3], bz = pts[(i + 1) * 3 + 2];
-        float dx = bx - ax, dz = bz - az;
-        float seglen = sqrtf(dx * dx + dz * dz);
-        int sub = (int)(seglen / step); if (sub < 1) sub = 1;
-        for (int s = 0; s < sub; s++) {
-            float t0 = (float)s / sub, t1 = (float)(s + 1) / sub;
-            float x0 = ax + dx*t0, z0 = az + dz*t0;
-            float x1 = ax + dx*t1, z1 = az + dz*t1;
-            float y0 = g3d_heightfield_height(H, side, ws, x0, z0);
-            float y1 = g3d_heightfield_height(H, side, ws, x1, z1);
-            float drop = y0 - y1;
-            float horiz = seglen / (float)sub + 1e-4f;
-            int steep = (drop > 1.2f && drop > horiz * 0.6f);   /* > ~30 deg y > 1.2u */
-            if (steep) {
-                float tiling = drop * 0.4f; if (tiling < 1.0f) tiling = 1.0f;
-                g3d_flow_add(x0, y0 + 0.3f, z0, x1, y1 - 0.3f, z1, width, 2.5f, tiling);
-                footx = x1; footz = z1;   /* recuerda el pie (punto mas bajo) */
+        float bx, bz; int sub;
+        if (i < n - 1) {
+            bx = pts[(i + 1) * 3]; bz = pts[(i + 1) * 3 + 2];
+            float dx = bx - ax, dz = bz - az;
+            sub = (int)(sqrtf(dx*dx + dz*dz) / step); if (sub < 1) sub = 1;
+        } else { bx = ax; bz = az; sub = 0; }
+        for (int s = (i == 0 ? 0 : 1); s <= sub; s++) {
+            float t = (sub > 0) ? (float)s / sub : 0.0f;
+            float x = ax + (bx - ax) * t, z = az + (bz - az) * t;
+            float y = g3d_heightfield_height(H, side, ws, x, z);
+            if (!first) {
+                float drop = py - y;
+                float horiz = sqrtf((x-px)*(x-px) + (z-pz)*(z-pz)) + 1e-4f;
+                int steep = (drop > 1.2f && drop > horiz * 0.6f);
+                if (steep && !inRun) { inRun = 1; topx = px; topy = py; topz = pz; }
+                if (!steep && inRun) {
+                    /* fin de la caida: emite UNA lamina del borde al pie (px,py,pz) */
+                    float wl = g3d_water_level_at(px, pz);
+                    float by = (wl > py) ? wl : py;              /* aterriza en el agua */
+                    float dropT = topy - by; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
+                    g3d_flow_add(topx, topy + 0.3f, topz, px, by, pz, width, 2.5f, til);
+                    g3d_water_add_ripple_source(px, pz, 1.3f);
+                    inRun = 0;
+                }
             }
-            /* al terminar una caida (steep -> plano), salpicadura en el pie: una
-               fuente de honda permanente en el agua de abajo (el motor la re-emite). */
-            if (wasSteep && !steep)
-                g3d_water_add_ripple_source(footx, footz, 1.3f);
-            wasSteep = steep;
+            px = x; py = y; pz = z; first = 0;
         }
     }
-    if (wasSteep) g3d_water_add_ripple_source(footx, footz, 1.3f);   /* caida hasta el final */
+    if (inRun) {   /* la caida llega hasta el final del rio */
+        float wl = g3d_water_level_at(px, pz);
+        float by = (wl > py) ? wl : py;
+        float dropT = topy - by; float til = dropT * 0.4f; if (til < 1.0f) til = 1.0f;
+        g3d_flow_add(topx, topy + 0.3f, topz, px, by, pz, width, 2.5f, til);
+        g3d_water_add_ripple_source(px, pz, 1.3f);
+    }
 }
 
 void g3d_flow_render_pass(G3DCamera *camera, int flip_y) {
