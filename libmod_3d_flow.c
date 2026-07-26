@@ -290,6 +290,27 @@ int g3d_flow_add(float tx, float ty, float tz, float bx, float by, float bz,
 #endif
 }
 
+/* Cascada COLOCADA A MANO (herramienta propia): del borde (tx,ty,tz) a la base
+   (bx,?,bz). La Y de la base se pone en la SUPERFICIE del agua si hay lago/rio
+   debajo (para fundirse con el), si no en el terreno. Pone una honda de
+   salpicadura al pie. Usa el estilo de flujo actual (color/textura/espuma/vel). */
+int g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float width) {
+    float by = ty;
+#ifndef VITA
+    /* base: terreno en (bx,bz), o la superficie del agua si la hay (mas alta) */
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (g3d_scene_heightfield(&H, &side, &ws) && side >= 2)
+        by = g3d_heightfield_height(H, side, ws, bx, bz);
+    float wl = g3d_water_level_at(bx, bz);
+    if (wl > by) by = wl;                       /* aterriza en el agua -> se funde */
+#endif
+    float drop = ty - by; if (drop < 0.1f) drop = 0.1f;
+    float til = drop * 0.4f; if (til < 1.0f) til = 1.0f;
+    int id = g3d_flow_add(tx, ty + 0.3f, tz, bx, by, bz, width, 2.5f, til);
+    g3d_water_add_ripple_source(bx, bz, 1.3f);   /* salpicadura en la poza */
+    return id;
+}
+
 int g3d_flow_add_river(void *terrain_mesh, float x0, float z0, float x1,
                        float z1, float width, float y_offset, float speed,
                        float tiling) {
