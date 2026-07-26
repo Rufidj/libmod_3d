@@ -544,7 +544,10 @@ void g3d_fluid_block_river(const float *pts_xyz, int n, float width) {
     if (!g_fluid_block || g_fluid_block_side != side || !pts_xyz || n < 2) return;
     int grid = side - 1;
     float cell = ws / (float)grid;
-    float r = width * 0.5f + cell;          /* un pelin mas ancho que el cauce */
+    /* Justo el ancho del cauce (la malla del rio lo tapa), pero al menos una celda
+       para que sea un muro continuo en rios finos. Mas ancho dejaria un borde de
+       lago escalonado sobresaliendo del rio. */
+    float r = fmaxf(width * 0.5f, cell);
     int ir = (int)(r / cell) + 1;
     for (int s = 0; s < n - 1; s++) {
         float ax = pts_xyz[s*3], az = pts_xyz[s*3+2];
