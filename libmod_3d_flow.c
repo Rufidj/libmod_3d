@@ -258,15 +258,19 @@ int g3d_flow_add(float tx, float ty, float tz, float bx, float by, float bz,
     if (hlen > 0.05f) { hx = dxh/hlen; hz = dzh/hlen; }
     else { hx = 0.0f; hz = 1.0f; }          /* caida vertical pura: orientacion por defecto */
     float px = -hz, pz = hx;                  /* perpendicular en XZ = ancho */
-    float fwd = width * 0.7f + 0.5f;          /* cuanto se separa del talud en la base */
+    /* Separacion del talud: CONSTANTE (todo el chorro delante del acantilado, no
+       solo la base) + un poco mas al caer, para que el hombro redondeado del borde
+       no tape la parte de arriba (ese era el "corte"). */
+    float fwd = width * 0.5f + 1.0f;
     int k = 0;
     for (int j = 0; j < vrows; j++) {
         float fv = (float)j / (float)rows;
         float cx = tx + (bx - tx) * fv;
         float cy = ty + (by - ty) * fv;
         float cz = tz + (bz - tz) * fv;
-        cx += hx * fwd * fv;                  /* arco hacia adelante (mas en la base) */
-        cz += hz * fwd * fv;
+        float pushf = fwd * (0.55f + 0.45f * fv);   /* algo de separacion ya arriba */
+        cx += hx * pushf;
+        cz += hz * pushf;
         for (int i = 0; i < vcols; i++) {
             float fu = (float)i / (float)cols;
             float ox = (fu - 0.5f) * 2.0f * hw;
