@@ -522,6 +522,8 @@ int g3d_scene_load(const char *file) {
 static unsigned char *g_fluid_block = NULL;
 static int g_fluid_block_side = 0;
 
+void g3d_lake_cover_reset(void);   /* definida mas abajo, junto a g_lake_cover */
+
 void g3d_fluid_block_reset(void) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) {
@@ -534,6 +536,8 @@ void g3d_fluid_block_reset(void) {
     } else if (g_fluid_block) {
         memset(g_fluid_block, 0, (size_t)side * side);
     }
+    /* la cobertura de lagos se rehace al crearlos; reiniciar aqui (antes de todo) */
+    g3d_lake_cover_reset();
 }
 
 /* Marca en la mascara las celdas del cauce de un rio (una banda de ancho `width`
@@ -549,6 +553,17 @@ void g3d_fluid_block_river(const float *pts_xyz, int n, float width) {
        lago escalonado sobresaliendo del rio. */
     float r = fmaxf(width * 0.5f, cell);
     int ir = (int)(r / cell) + 1;
+    /* Longitud total del camino, para dejar un MARGEN sin bloquear en los dos
+       extremos: asi un lago pegado a la boca puede entrar por el cauce y unirse al
+       rio (estuario), en vez de quedar un lecho seco entre ambos. El interior del
+       cauce si se bloquea, para que el lago no lo inunde entero. */
+    float total = 0.0f;
+    for (int s = 0; s < n - 1; s++) {
+        float dx = pts_xyz[(s+1)*3]-pts_xyz[s*3], dz = pts_xyz[(s+1)*3+2]-pts_xyz[s*3+2];
+        total += sqrtf(dx*dx + dz*dz);
+    }
+    float margin = fminf(width * 1.5f, total * 0.35f);   /* no comerse rios cortos */
+    float along = 0.0f;
     for (int s = 0; s < n - 1; s++) {
         float ax = pts_xyz[s*3], az = pts_xyz[s*3+2];
         float bx = pts_xyz[(s+1)*3], bz = pts_xyz[(s+1)*3+2];
@@ -556,6 +571,8 @@ void g3d_fluid_block_river(const float *pts_xyz, int n, float width) {
         int steps = (int)(L / (cell*0.5f)) + 1;
         for (int k = 0; k <= steps; k++) {
             float t = (float)k/steps, x = ax+dx*t, z = az+dz*t;
+            float dist = along + L*t;                    /* distancia desde el inicio */
+            if (dist < margin || dist > total - margin) continue;   /* deja libre la boca */
             int ci = (int)lrintf((x/ws + 0.5f)*grid);
             int cj = (int)lrintf((z/ws + 0.5f)*grid);
             for (int jj = cj-ir; jj <= cj+ir; jj++)
@@ -566,7 +583,30 @@ void g3d_fluid_block_river(const float *pts_xyz, int n, float width) {
                 if (ex*ex + ez*ez <= r*r) g_fluid_block[jj*side + ii] = 1;
             }
         }
+        along += L;
     }
+}
+
+/* Cobertura REAL de los lagos (union de las celdas rellenadas por el flood-fill,
+   no la caja). La usa el editor para recortar el rio EXACTAMENTE donde el lago lo
+   cubre, y unirlos sin lecho seco ni solape. Se reinicia en g3d_fluid_block_reset. */
+static unsigned char *g_lake_cover = NULL;
+static int g_lake_cover_side = 0;
+
+void g3d_lake_cover_reset(void) {
+    if (g_lake_cover) memset(g_lake_cover, 0, (size_t)g_lake_cover_side * g_lake_cover_side);
+}
+
+/* 1 si (x,z) esta cubierto por algun lago (celda rellenada por el flood-fill). */
+int g3d_lake_covers(float x, float z) {
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g_lake_cover || !g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0;
+    if (g_lake_cover_side != side) return 0;
+    int grid = side - 1;
+    int ci = (int)lrintf((x/ws + 0.5f)*grid);
+    int cj = (int)lrintf((z/ws + 0.5f)*grid);
+    if (ci < 0 || cj < 0 || ci >= side || cj >= side) return 0;
+    return g_lake_cover[cj * side + ci] ? 1 : 0;
 }
 
 int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
@@ -580,7 +620,17 @@ int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
        los rios (blk) actuan de muro para que el lago no suba por ellos. */
     G3DMesh *lm = g3d_fluid_build_lake(H, side, ws, seed_x, seed_z,
                                        surface_y, surface_y, blk, filled, &d, ws);
-    if (filled) free(filled);
+    /* acumula la cobertura real del lago para el recorte de rios */
+    if (filled) {
+        if (g_lake_cover_side != side) {
+            free(g_lake_cover);
+            g_lake_cover = (unsigned char *)calloc((size_t)side * side, 1);
+            g_lake_cover_side = g_lake_cover ? side : 0;
+        }
+        if (g_lake_cover)
+            for (int i = 0; i < side * side; i++) if (filled[i]) g_lake_cover[i] = 1;
+        free(filled);
+    }
     if (!lm) return -1;
     return g3d_fluid_add_mesh(lm, d);
 }

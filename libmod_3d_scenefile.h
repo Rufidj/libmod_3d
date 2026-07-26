@@ -40,6 +40,9 @@ float g3d_lake_spill_level(float seed_x, float seed_z);
    rios ANTES de crear los lagos, para que el lago no suba por el rio. */
 void  g3d_fluid_block_reset(void);
 void  g3d_fluid_block_river(const float *pts_xyz, int n, float width);
+/* 1 si (x,z) esta cubierto por la superficie REAL de algun lago (no la caja). */
+int   g3d_lake_covers(float x, float z);
+void  g3d_lake_cover_reset(void);
 /* Rios por camino de puntos (agua + flujo + cascadas). */
 int   g3d_river_add(const float *pts_xyz, int n, float width);
 int   g3d_river_begin(float width, float rise);
