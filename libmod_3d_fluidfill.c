@@ -55,10 +55,20 @@ static int heap_pop(Heap *h, float *key, int *cell) {
 
 float g3d_fluid_spill_level(const float *H, int side, float ws, float seedX, float seedZ,
                             const unsigned char *blocked) {
+    return g3d_fluid_spill_level_r(H, side, ws, seedX, seedZ, blocked, 0.0f);
+}
+
+/* Como g3d_fluid_spill_level pero acotado a un disco de max_radius: el "borde"
+   por el que desborda es el limite del disco (o el del mapa). Asi da el nivel de
+   desborde del basin LOCAL, para hoyos abiertos al borde de una montana. */
+float g3d_fluid_spill_level_r(const float *H, int side, float ws, float seedX, float seedZ,
+                              const unsigned char *blocked, float max_radius) {
     if (!H || side < 2) return 0.0f;
     int grid = side - 1, N = side * side;
     int si, sj; world_to_cell(side, ws, seedX, seedZ, &si, &sj);
     int seed = sj * side + si;
+    float maxCells = (max_radius > 0.0f) ? max_radius / (ws / (float)grid) : 0.0f;
+    float maxCells2 = maxCells * maxCells;
 
     /* Dijkstra with a "max height along path" cost: the level needed to reach a
        cell is the largest terrain height on the cheapest path from the seed.
@@ -76,7 +86,12 @@ float g3d_fluid_spill_level(const float *H, int side, float ws, float seedX, flo
         if (done[c]) continue;
         done[c] = 1;
         int i = c % side, j = c / side;
+        /* desborda por el borde del mapa O por el limite del disco local */
         if (i == 0 || j == 0 || i == grid || j == grid) { spill = key; break; }
+        if (maxCells2 > 0.0f) {
+            float di = (float)(i - si), dj = (float)(j - sj);
+            if (di * di + dj * dj > maxCells2) { spill = key; break; }
+        }
         int nb[4] = { c - 1, c + 1, c - side, c + side };
         int ni[4] = { i - 1, i + 1, i, i };
         int nj[4] = { j, j, j - 1, j + 1 };

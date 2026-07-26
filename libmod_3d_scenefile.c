@@ -610,16 +610,23 @@ int g3d_lake_covers(float x, float z) {
 }
 
 int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
+    return g3d_lake_add_r(seed_x, seed_z, surface_y, depth, 0.0f);   /* 0 = sin limite */
+}
+
+/* Como g3d_lake_add pero con RADIO MAXIMO: el agua solo llena un disco de
+   max_radius alrededor del punto. Para hoyos ABIERTOS (al borde de una montana),
+   evita que el agua se desborde y llene todo el escenario. 0 = sin limite. */
+int g3d_lake_add_r(float seed_x, float seed_z, float surface_y, float depth, float max_radius) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return -1;
     unsigned char *filled = (unsigned char *)calloc((size_t)side * side, 1);
     float d = depth;
     const unsigned char *blk = (g_fluid_block && g_fluid_block_side == side) ? g_fluid_block : NULL;
-    /* footprint = celdas por debajo del nivel; superficie al mismo nivel;
-       radio maximo = todo el mapa (que llene la depresion entera). Los cauces de
-       los rios (blk) actuan de muro para que el lago no suba por ellos. */
+    /* footprint = celdas por debajo del nivel; superficie al mismo nivel. Los
+       cauces de los rios (blk) son muro. max_radius acota el llenado (0=todo). */
+    float mr = (max_radius > 0.0f) ? max_radius : ws;
     G3DMesh *lm = g3d_fluid_build_lake(H, side, ws, seed_x, seed_z,
-                                       surface_y, surface_y, blk, filled, &d, ws);
+                                       surface_y, surface_y, blk, filled, &d, mr);
     /* acumula la cobertura real del lago para el recorte de rios */
     if (filled) {
         if (g_lake_cover_side != side) {
@@ -638,10 +645,13 @@ int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
 /* Nivel al que se desbordaria una depresion desde el punto semilla (para poner
    el agua justo por debajo y que no rebose por el borde del mapa). */
 float g3d_lake_spill_level(float seed_x, float seed_z) {
+    return g3d_lake_spill_level_r(seed_x, seed_z, 0.0f);
+}
+float g3d_lake_spill_level_r(float seed_x, float seed_z, float max_radius) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0.0f;
     const unsigned char *blk = (g_fluid_block && g_fluid_block_side == side) ? g_fluid_block : NULL;
-    return g3d_fluid_spill_level(H, side, ws, seed_x, seed_z, blk);
+    return g3d_fluid_spill_level_r(H, side, ws, seed_x, seed_z, blk, max_radius);
 }
 
 /* ---------------------------------------------------------------------------

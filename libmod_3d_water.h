@@ -121,6 +121,9 @@ void g3d_water_draw_mesh(G3DMesh *mesh, G3DCamera *camera, int flip_y);
    edge). Click in a hole -> get the brim level. */
 float g3d_fluid_spill_level(const float *heights, int side, float world_size,
                             float seedX, float seedZ, const unsigned char *blocked);
+float g3d_fluid_spill_level_r(const float *heights, int side, float world_size,
+                              float seedX, float seedZ, const unsigned char *blocked,
+                              float max_radius);
 
 /* Build a lake surface mesh. The FOOTPRINT (shape) is the cells connected to
    (seedX,seedZ) whose terrain is below `footprintLevel` (use the spill level so

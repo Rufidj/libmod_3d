@@ -1461,6 +1461,10 @@ int64_t g3d_lake_add_bgd(INSTANCE *my, int64_t *params) {
     return g3d_lake_add(*(float *)&params[0], *(float *)&params[1],
                         *(float *)&params[2], *(float *)&params[3]);
 }
+int64_t g3d_lake_add_r_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_lake_add_r(*(float *)&params[0], *(float *)&params[1],
+                          *(float *)&params[2], *(float *)&params[3], *(float *)&params[4]);
+}
 int64_t g3d_lake_spill_level_bgd(INSTANCE *my, int64_t *params) {
     float v = g3d_lake_spill_level(*(float *)&params[0], *(float *)&params[1]);
     return (int64_t) * (int32_t *)&v;

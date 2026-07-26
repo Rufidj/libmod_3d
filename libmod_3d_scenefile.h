@@ -35,7 +35,9 @@ float g3d_scene_water_level(void);
 int   g3d_scene_heightfield(const float **H, int *side, float *world_size);
 /* Lagos por flood-fill de alto nivel (rellenan un hoyo del terreno activo). */
 int   g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth);
+int   g3d_lake_add_r(float seed_x, float seed_z, float surface_y, float depth, float max_radius);
 float g3d_lake_spill_level(float seed_x, float seed_z);
+float g3d_lake_spill_level_r(float seed_x, float seed_z, float max_radius);
 /* Mascara de bloqueo del flood-fill de lagos: rellenar con los cauces de los
    rios ANTES de crear los lagos, para que el lago no suba por el rio. */
 void  g3d_fluid_block_reset(void);
