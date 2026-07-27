@@ -264,10 +264,11 @@ static const char *water_frag =
     "    float sdepth = vShoreDepth;\n"
     "    if (uDepthShore == 1 && uHasDepth == 1) {\n"
     "        float sdz = texture(uDepthTex, suv).r;\n"
-    "        vec4 wp = uInvViewProj * vec4(suv * 2.0 - 1.0, sdz * 2.0 - 1.0, 1.0);\n"
-    "        float terrainY = wp.y / wp.w;\n"
-    "        sdepth = vWorldPos.y - terrainY;\n"          // profundidad del agua aqui
-    "        if (sdepth < 0.04) discard;\n"               // terreno por encima -> tierra
+    "        if (sdz < 0.99999) {\n"                       // hay terreno detras (no cielo)
+    "            vec4 wp = uInvViewProj * vec4(suv * 2.0 - 1.0, sdz * 2.0 - 1.0, 1.0);\n"
+    "            sdepth = vWorldPos.y - wp.y / wp.w;\n"     // profundidad del agua aqui
+    "            if (sdepth < -0.4) discard;\n"             // solo TIERRA clara; la orilla la funde el alpha
+    "        }\n"
     "    }\n"
     // Colour by REAL water depth (shore depth): turquoise in the shallows -> deep blue
     // offshore. (Falls back to the fixed uDepth for the classic plane with no shore data.)
