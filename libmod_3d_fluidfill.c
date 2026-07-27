@@ -458,11 +458,35 @@ int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsign
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0;
     int grid = side - 1, N = side * side;
 
+    /* SUAVIZA el relieve para el analisis (varias pasadas de media 3x3), para que el
+       RUIDO del terreno no cree micro-hoyos y micro-cauces por todos lados. El agua
+       se decide sobre el relieve suave; los builders usan el relieve real. */
+    float *Hs = (float *)malloc((size_t)N * sizeof(float));
+    float *Ht = (float *)malloc((size_t)N * sizeof(float));
+    if (!Hs || !Ht) { free(Hs); free(Ht); return 0; }
+    for (int k = 0; k < N; k++) Hs[k] = H[k];
+    for (int pass = 0; pass < 3; pass++) {
+        for (int j = 0; j <= grid; j++)
+            for (int i = 0; i <= grid; i++) {
+                float sum = 0.0f; int cnt = 0;
+                for (int dj = -1; dj <= 1; dj++)
+                    for (int di = -1; di <= 1; di++) {
+                        int ni = i+di, nj = j+dj;
+                        if (ni < 0 || nj < 0 || ni > grid || nj > grid) continue;
+                        sum += Hs[nj*side+ni]; cnt++;
+                    }
+                Ht[j*side+i] = sum / cnt;
+            }
+        float *tmp = Hs; Hs = Ht; Ht = tmp;
+    }
+    free(Ht);
+    H = Hs;   /* el analisis usa el relieve SUAVIZADO */
+
     float *filled = (float *)malloc((size_t)N * sizeof(float));
     int   *recv   = (int *)  malloc((size_t)N * sizeof(int));
     int   *order  = (int *)  malloc((size_t)N * sizeof(int));
     char  *done   = (char *) calloc((size_t)N, 1);
-    if (!filled || !recv || !order || !done) { free(filled);free(recv);free(order);free(done); return 0; }
+    if (!filled || !recv || !order || !done) { free(filled);free(recv);free(order);free(done);free(Hs); return 0; }
     for (int k = 0; k < N; k++) { filled[k] = 1e30f; recv[k] = -1; }
 
     /* 1) Priority-Flood desde el borde del mapa */
@@ -516,7 +540,8 @@ int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsign
                 int n = nb[d]; if (lake[n] && !vis[n]) { vis[n] = 1; stk[sp++] = n; }
             }
         }
-        if (cells < 3) continue;   /* charco insignificante */
+        int minLakeCells = N / 1200; if (minLakeCells < 15) minLakeCells = 15;
+        if (cells < minLakeCells) continue;   /* charco insignificante -> no es lago */
         g_hyd.lakes[g_hyd.nlakes].x = hyd_cx(seed, side, ws);
         g_hyd.lakes[g_hyd.nlakes].z = hyd_cz(seed, side, ws);
         g_hyd.lakes[g_hyd.nlakes].level = lvl;
@@ -557,6 +582,7 @@ int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsign
     }
 
     free(filled); free(recv); free(acc); free(lake); free(vis); free(stk); free(river); free(used);
+    free(Hs);   /* relieve suavizado (H apuntaba aqui) */
     return 1;
 }
 
