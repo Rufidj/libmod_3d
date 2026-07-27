@@ -426,3 +426,148 @@ int g3d_river_trim_count(const float *pts, int n, int side, float ws,
     }
     return n;
 }
+
+/* ============================================================================
+   HIDROLOGIA AUTOMATICA: analiza el mapa de alturas y deduce donde va cada agua
+   (lagos, rios, cascadas). Algoritmo estandar de terreno/GIS:
+     1) Priority-Flood: procesa desde el borde con una cola por altura; da para
+        cada celda la altura del AGUA EMBALSADA (filled, con los hoyos rellenos) y
+        el receptor (recv) = celda hacia la que drena (cuesta abajo).
+     2) Acumulacion de caudal: cada celda aporta 1 (lluvia) y se suma aguas abajo.
+     3) Lagos = zonas donde filled > terreno (el agua se embalsa).
+     4) Rios = celdas con mucha acumulacion que NO son lago.
+   El editor consulta los resultados (lagos y polilineas de rio), excava los
+   cauces y construye el agua reutilizando los builders de lagos/rios/cascadas.
+   ========================================================================== */
+#define HYD_MAXLAKES 512
+#define HYD_MAXRIVERS 512
+#define HYD_MAXRPTS  600
+static struct {
+    struct { float x, z, level; } lakes[HYD_MAXLAKES];
+    int nlakes;
+    struct { float pts[HYD_MAXRPTS * 2]; int n; } rivers[HYD_MAXRIVERS];
+    int nrivers;
+} g_hyd = {0};
+
+static inline float hyd_cx(int c, int side, float ws) { int grid=side-1; return ((float)(c % side)/grid - 0.5f)*ws; }
+static inline float hyd_cz(int c, int side, float ws) { int grid=side-1; return ((float)(c / side)/grid - 0.5f)*ws; }
+
+int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsigned char *exclude) {
+    g_hyd.nlakes = 0; g_hyd.nrivers = 0;
+    const float *H = NULL; int side = 0; float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0;
+    int grid = side - 1, N = side * side;
+
+    float *filled = (float *)malloc((size_t)N * sizeof(float));
+    int   *recv   = (int *)  malloc((size_t)N * sizeof(int));
+    int   *order  = (int *)  malloc((size_t)N * sizeof(int));
+    char  *done   = (char *) calloc((size_t)N, 1);
+    if (!filled || !recv || !order || !done) { free(filled);free(recv);free(order);free(done); return 0; }
+    for (int k = 0; k < N; k++) { filled[k] = 1e30f; recv[k] = -1; }
+
+    /* 1) Priority-Flood desde el borde del mapa */
+    Heap h = {0};
+    for (int i = 0; i <= grid; i++) {
+        int bc[4] = { i, grid*side + i, i*side, i*side + grid };
+        for (int t = 0; t < 4; t++) { int c = bc[t]; if (!done[c]) { done[c]=1; filled[c]=H[c]; heap_push(&h, H[c], c); } }
+    }
+    int no = 0; float key; int c;
+    while (heap_pop(&h, &key, &c)) {
+        order[no++] = c;
+        int i = c % side, j = c / side;
+        int nb[4] = { c-1, c+1, c-side, c+side };
+        int ni[4] = { i-1, i+1, i, i };
+        int nj[4] = { j, j, j-1, j+1 };
+        for (int d = 0; d < 4; d++) {
+            if (ni[d] < 0 || nj[d] < 0 || ni[d] > grid || nj[d] > grid) continue;
+            int n = nb[d]; if (done[n]) continue;
+            done[n] = 1;
+            filled[n] = H[n] > filled[c] ? H[n] : filled[c];   /* embalse: llena hoyos */
+            recv[n] = c;                                        /* drena hacia c */
+            heap_push(&h, filled[n], n);
+        }
+    }
+    free(h.a); free(done);
+
+    /* 2) Acumulacion de caudal (orden inverso al de asentamiento: de mas alto a mas bajo) */
+    float *acc = (float *)malloc((size_t)N * sizeof(float));
+    for (int k = 0; k < N; k++) acc[k] = 1.0f;
+    for (int o = no - 1; o >= 0; o--) { int cc = order[o]; if (recv[cc] >= 0) acc[recv[cc]] += acc[cc]; }
+    free(order);
+
+    /* 3) LAGOS: regiones conexas donde el agua se embalsa (filled > terreno) */
+    char *lake = (char *)calloc((size_t)N, 1);
+    for (int k = 0; k < N; k++)
+        if (filled[k] > H[k] + min_lake_depth && !(exclude && exclude[k])) lake[k] = 1;
+    char *vis = (char *)calloc((size_t)N, 1);
+    int  *stk = (int *)malloc((size_t)N * sizeof(int));
+    for (int s0 = 0; s0 < N && g_hyd.nlakes < HYD_MAXLAKES; s0++) {
+        if (!lake[s0] || vis[s0]) continue;
+        int sp = 0; stk[sp++] = s0; vis[s0] = 1;
+        int seed = s0; float minH = H[s0]; float lvl = filled[s0]; int cells = 0;
+        while (sp > 0) {
+            int c2 = stk[--sp]; cells++;
+            if (H[c2] < minH) { minH = H[c2]; seed = c2; }
+            int i = c2 % side, j = c2 / side;
+            int nb[4] = { c2-1, c2+1, c2-side, c2+side };
+            int ni[4] = { i-1, i+1, i, i }, nj[4] = { j, j, j-1, j+1 };
+            for (int d = 0; d < 4; d++) {
+                if (ni[d] < 0 || nj[d] < 0 || ni[d] > grid || nj[d] > grid) continue;
+                int n = nb[d]; if (lake[n] && !vis[n]) { vis[n] = 1; stk[sp++] = n; }
+            }
+        }
+        if (cells < 3) continue;   /* charco insignificante */
+        g_hyd.lakes[g_hyd.nlakes].x = hyd_cx(seed, side, ws);
+        g_hyd.lakes[g_hyd.nlakes].z = hyd_cz(seed, side, ws);
+        g_hyd.lakes[g_hyd.nlakes].level = lvl;
+        g_hyd.nlakes++;
+    }
+
+    /* 4) RIOS: celdas con mucho caudal que NO son lago; se trazan desde las
+          cabeceras (sin rio aguas arriba) siguiendo recv hasta un lago/mar/borde */
+    char *river = (char *)calloc((size_t)N, 1);
+    for (int k = 0; k < N; k++)
+        if (acc[k] > river_thresh && !lake[k] && !(exclude && exclude[k])) river[k] = 1;
+    char *used = (char *)calloc((size_t)N, 1);
+    for (int s0 = 0; s0 < N && g_hyd.nrivers < HYD_MAXRIVERS; s0++) {
+        if (!river[s0] || used[s0]) continue;
+        int i0 = s0 % side, j0 = s0 / side, isHead = 1;
+        int nb[4] = { s0-1, s0+1, s0-side, s0+side };
+        int ni[4] = { i0-1, i0+1, i0, i0 }, nj[4] = { j0, j0, j0-1, j0+1 };
+        for (int d = 0; d < 4; d++) {
+            if (ni[d] < 0 || nj[d] < 0 || ni[d] > grid || nj[d] > grid) continue;
+            int n = nb[d]; if (river[n] && recv[n] == s0) { isHead = 0; break; }
+        }
+        if (!isHead) continue;
+        int rp = 0, cur = s0;
+        while (cur >= 0 && river[cur] && !used[cur] && rp < HYD_MAXRPTS) {
+            used[cur] = 1;
+            g_hyd.rivers[g_hyd.nrivers].pts[rp*2]   = hyd_cx(cur, side, ws);
+            g_hyd.rivers[g_hyd.nrivers].pts[rp*2+1] = hyd_cz(cur, side, ws);
+            rp++;
+            cur = recv[cur];
+        }
+        /* incluye la celda final (entrada al lago/mar) para que conecte */
+        if (cur >= 0 && rp < HYD_MAXRPTS) {
+            g_hyd.rivers[g_hyd.nrivers].pts[rp*2]   = hyd_cx(cur, side, ws);
+            g_hyd.rivers[g_hyd.nrivers].pts[rp*2+1] = hyd_cz(cur, side, ws);
+            rp++;
+        }
+        if (rp >= 2) { g_hyd.rivers[g_hyd.nrivers].n = rp; g_hyd.nrivers++; }
+    }
+
+    free(filled); free(recv); free(acc); free(lake); free(vis); free(stk); free(river); free(used);
+    return 1;
+}
+
+int  g3d_hydrology_lake_count(void) { return g_hyd.nlakes; }
+void g3d_hydrology_lake(int i, float *x, float *z, float *level) {
+    if (i < 0 || i >= g_hyd.nlakes) return;
+    if (x) *x = g_hyd.lakes[i].x; if (z) *z = g_hyd.lakes[i].z; if (level) *level = g_hyd.lakes[i].level;
+}
+int  g3d_hydrology_river_count(void) { return g_hyd.nrivers; }
+int  g3d_hydrology_river_len(int i) { return (i>=0 && i<g_hyd.nrivers) ? g_hyd.rivers[i].n : 0; }
+void g3d_hydrology_river_point(int i, int k, float *x, float *z) {
+    if (i < 0 || i >= g_hyd.nrivers || k < 0 || k >= g_hyd.rivers[i].n) return;
+    if (x) *x = g_hyd.rivers[i].pts[k*2]; if (z) *z = g_hyd.rivers[i].pts[k*2+1];
+}

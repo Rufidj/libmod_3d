@@ -125,6 +125,15 @@ float g3d_fluid_spill_level_r(const float *heights, int side, float world_size,
                               float seedX, float seedZ, const unsigned char *blocked,
                               float max_radius);
 
+/* Hidrologia automatica: analiza el terreno activo y deduce lagos/rios. Luego se
+   consultan los resultados para construir el agua (el editor excava y renderiza). */
+int  g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsigned char *exclude);
+int  g3d_hydrology_lake_count(void);
+void g3d_hydrology_lake(int i, float *x, float *z, float *level);
+int  g3d_hydrology_river_count(void);
+int  g3d_hydrology_river_len(int i);
+void g3d_hydrology_river_point(int i, int k, float *x, float *z);
+
 /* Build a lake surface mesh. The FOOTPRINT (shape) is the cells connected to
    (seedX,seedZ) whose terrain is below `footprintLevel` (use the spill level so
    it matches the hole); the water surface is placed at `surfaceY`. Decoupling
