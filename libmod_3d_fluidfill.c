@@ -458,29 +458,33 @@ int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsign
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return 0;
     int grid = side - 1, N = side * side;
 
-    /* SUAVIZA el relieve para el analisis (varias pasadas de media 3x3), para que el
-       RUIDO del terreno no cree micro-hoyos y micro-cauces por todos lados. El agua
-       se decide sobre el relieve suave; los builders usan el relieve real. */
-    float *Hs = (float *)malloc((size_t)N * sizeof(float));
-    float *Ht = (float *)malloc((size_t)N * sizeof(float));
-    if (!Hs || !Ht) { free(Hs); free(Ht); return 0; }
+    /* SUAVIZA el relieve para el analisis (para que el RUIDO no cree micro-agua):
+       Hs = suavizado ligero (2 pasadas) para el flujo/lagos; Hs2 = suavizado AMPLIO
+       (referencia del relieve "sin cauces") para saber si una celda esta ENCAJADA
+       (un canal/hoyo excavado) frente a la ladera general. El agua se decide sobre el
+       relieve suave; los builders usan el relieve real. */
+    float *Hs  = (float *)malloc((size_t)N * sizeof(float));  /* ligero (flujo/lagos) */
+    float *Hs2 = (float *)malloc((size_t)N * sizeof(float));  /* amplio (ref. encajado) */
+    float *Ht  = (float *)malloc((size_t)N * sizeof(float));  /* scratch */
+    if (!Hs || !Hs2 || !Ht) { free(Hs); free(Hs2); free(Ht); return 0; }
+    #define HYD_BLUR(buf, passes) do { \
+        for (int p_ = 0; p_ < (passes); p_++) { \
+            for (int j = 0; j <= grid; j++) for (int i = 0; i <= grid; i++) { \
+                float sum = 0.0f; int cnt = 0; \
+                for (int dj = -1; dj <= 1; dj++) for (int di = -1; di <= 1; di++) { \
+                    int ni = i+di, nj = j+dj; \
+                    if (ni < 0 || nj < 0 || ni > grid || nj > grid) continue; \
+                    sum += (buf)[nj*side+ni]; cnt++; } \
+                Ht[j*side+i] = sum / cnt; } \
+            for (int k = 0; k < N; k++) (buf)[k] = Ht[k]; \
+        } } while (0)
     for (int k = 0; k < N; k++) Hs[k] = H[k];
-    for (int pass = 0; pass < 3; pass++) {
-        for (int j = 0; j <= grid; j++)
-            for (int i = 0; i <= grid; i++) {
-                float sum = 0.0f; int cnt = 0;
-                for (int dj = -1; dj <= 1; dj++)
-                    for (int di = -1; di <= 1; di++) {
-                        int ni = i+di, nj = j+dj;
-                        if (ni < 0 || nj < 0 || ni > grid || nj > grid) continue;
-                        sum += Hs[nj*side+ni]; cnt++;
-                    }
-                Ht[j*side+i] = sum / cnt;
-            }
-        float *tmp = Hs; Hs = Ht; Ht = tmp;
-    }
+    HYD_BLUR(Hs, 2);                                  /* ligero */
+    for (int k = 0; k < N; k++) Hs2[k] = Hs[k];
+    HYD_BLUR(Hs2, 6);                                 /* amplio (referencia) */
+    #undef HYD_BLUR
     free(Ht);
-    H = Hs;   /* el analisis usa el relieve SUAVIZADO */
+    H = Hs;   /* el analisis (flujo/lagos) usa el relieve LIGERO */
 
     float *filled = (float *)malloc((size_t)N * sizeof(float));
     int   *recv   = (int *)  malloc((size_t)N * sizeof(int));
@@ -552,7 +556,10 @@ int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsign
           cabeceras (sin rio aguas arriba) siguiendo recv hasta un lago/mar/borde */
     char *river = (char *)calloc((size_t)N, 1);
     for (int k = 0; k < N; k++)
-        if (acc[k] > river_thresh && !lake[k] && !(exclude && exclude[k])) river[k] = 1;
+        if (acc[k] > river_thresh && !lake[k] && !(exclude && exclude[k])
+            && H[k] < Hs2[k] - 0.6f)   /* ENCAJADO: mas bajo que la ladera general
+                                          -> solo rellena cauces excavados, no laderas */
+            river[k] = 1;
     char *used = (char *)calloc((size_t)N, 1);
     for (int s0 = 0; s0 < N && g_hyd.nrivers < HYD_MAXRIVERS; s0++) {
         if (!river[s0] || used[s0]) continue;
@@ -582,7 +589,7 @@ int g3d_hydrology_analyze(float river_thresh, float min_lake_depth, const unsign
     }
 
     free(filled); free(recv); free(acc); free(lake); free(vis); free(stk); free(river); free(used);
-    free(Hs);   /* relieve suavizado (H apuntaba aqui) */
+    free(Hs); free(Hs2);   /* relieve suavizado (H apuntaba a Hs) */
     return 1;
 }
 
