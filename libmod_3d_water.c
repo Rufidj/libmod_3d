@@ -3,6 +3,7 @@
  */
 
 #include "libmod_3d_water.h"
+#include "libmod_3d_watersim.h"   /* flotacion en el agua que fluye (sim) */
 #include "libmod_3d_shader.h"
 #include "libmod_3d_mesh.h"
 #include "libmod_3d_primitives.h"
@@ -878,6 +879,12 @@ float g3d_water_level_at(float x, float z) {
     }
     if (g_water.enabled && g_water.initialized && g_water.level > best)
         best = g_water.level;
+    /* Agua que FLUYE (simulacion): los objetos flotan y se dejan llevar por el rio,
+       el charco o la cascada que hay debajo, no solo por el agua estatica. */
+    if (g3d_watersim_active()) {
+        float wl = g3d_watersim_level_at(x, z);
+        if (wl > best) best = wl;
+    }
     return best;
 }
 
