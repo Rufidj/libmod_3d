@@ -258,8 +258,10 @@ static void wsim_build_mesh(void) {
             cells++;
     if (cells == 0) { free(wl); free(wet); return; }
 
-    G3DVertex *verts = (G3DVertex *)malloc((size_t)cells * 4 * sizeof(G3DVertex));
-    uint32_t *idx = (uint32_t *)malloc((size_t)cells * 6 * sizeof(uint32_t));
+    /* sobredimensiona: cada celda puede aportar su cuadrado horizontal + una cara
+       VERTICAL de cascada (donde el agua cae por un desnivel). */
+    G3DVertex *verts = (G3DVertex *)malloc((size_t)cells * 8 * sizeof(G3DVertex));
+    uint32_t *idx = (uint32_t *)malloc((size_t)cells * 12 * sizeof(uint32_t));
     if (!verts || !idx) { free(verts); free(idx); free(wl); free(wet); return; }
     int v = 0, ic = 0;
     float cw = W.cell_w;
@@ -301,7 +303,48 @@ static void wsim_build_mesh(void) {
             idx[ic++] = base + 1; idx[ic++] = base + 2; idx[ic++] = base + 3;
         }
     }
-    W.mesh = g3d_mesh_create("watersim", verts, (uint32_t)(cells * 4), idx, (uint32_t)(cells * 6));
+    /* CARAS VERTICALES de CASCADA: donde una celda mojada cae sobre un vecino MUCHO
+       mas bajo (desnivel > umbral), se emite un cuadrado vertical desde la lamina de
+       arriba hasta el agua/terreno de abajo, para que se vea el agua CAYENDO por el
+       acantilado (el height-field por si solo no lo muestra). */
+    const float FALL = 2.0f;   /* desnivel minimo para dibujar la caida */
+    for (int j = 0; j < S; j++) for (int i = 0; i < S; i++) {
+        int c = j * S + i;
+        if (!wet[c]) continue;
+        /* elige la caida MAS fuerte (un vecino) para no pasarnos del buffer */
+        struct { int ni, nj, dxr, dzr; } nb[4] = { {i-1,j,-1,0},{i+1,j,1,0},{i,j-1,0,-1},{i,j+1,0,1} };
+        int bd = -1; float bdrop = FALL;
+        for (int d = 0; d < 4; d++) {
+            int ni = nb[d].ni, nj = nb[d].nj;
+            if (ni < 0 || nj < 0 || ni >= S || nj >= S) continue;
+            float drop = W.terr[c] - W.terr[nj*S+ni];
+            if (drop > bdrop) { bdrop = drop; bd = d; }
+        }
+        if (bd < 0) continue;
+        int nc = nb[bd].nj * S + nb[bd].ni;
+        float topL = wl[c];
+        float botL = wet[nc] ? wl[nc] : W.terr[nc];   /* aterriza en el agua o el suelo de abajo */
+        if (topL - botL < FALL * 0.5f) continue;
+        float x0 = ((float)i / grid - 0.5f) * W.ws, z0 = ((float)j / grid - 0.5f) * W.ws;
+        float ex, ez, tx, tz;                         /* arista perpendicular a la caida */
+        if (nb[bd].dxr != 0) { ex = x0 + (nb[bd].dxr > 0 ? cw : 0.0f); ez = z0; tx = ex; tz = z0 + cw; }
+        else                 { ez = z0 + (nb[bd].dzr > 0 ? cw : 0.0f); ex = x0; tx = x0 + cw; tz = ez; }
+        float nx = (float)nb[bd].dxr, nz = (float)nb[bd].dzr;
+        int b = v;
+        float px[4] = { ex, tx, ex, tx };
+        float pz[4] = { ez, tz, ez, tz };
+        float py[4] = { topL, topL, botL, botL };
+        float uv[4] = { 0.0f, 0.0f, bdrop, bdrop };   /* profundidad -> espuma en la caida */
+        for (int k = 0; k < 4; k++) {
+            verts[v].position[0] = px[k]; verts[v].position[1] = py[k]; verts[v].position[2] = pz[k];
+            verts[v].normal[0] = nx; verts[v].normal[1] = 0.0f; verts[v].normal[2] = nz;
+            verts[v].texcoord[0] = uv[k]; verts[v].texcoord[1] = 0.0f;
+            v++;
+        }
+        idx[ic++] = b+0; idx[ic++] = b+2; idx[ic++] = b+1;   /* una cara (el agua no hace culling) */
+        idx[ic++] = b+1; idx[ic++] = b+2; idx[ic++] = b+3;
+    }
+    W.mesh = g3d_mesh_create("watersim", verts, (uint32_t)v, idx, (uint32_t)ic);
     free(verts); free(idx); free(wl); free(wet);
     if (W.mesh) g3d_mesh_upload_gpu(W.mesh);
 }
