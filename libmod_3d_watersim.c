@@ -249,10 +249,17 @@ static void wsim_build_mesh(void) {
             float cx[4] = { x0, x0 + cw, x0, x0 + cw };
             float cz[4] = { z0, z0, z0 + cw, z0 + cw };
             int base = v;
+            /* nivel de agua de la CELDA = media de sus esquinas MOJADAS. Las esquinas
+               SECAS (el feather de un cauce sobre una pared) se ponen a ESE nivel, no
+               a su terreno alto -> el agua NO trepa por las paredes (se queda plana y
+               el terreno la tapa donde sube). */
+            float cellL = 0.0f; int cellN = 0;
+            for (int k = 0; k < 4; k++) { int cc = cj[k]*S+ci[k]; if (wet[cc]) { cellL += wl[cc]; cellN++; } }
+            cellL = cellN ? cellL / (float)cellN : W.terr[j*S+i];
             for (int k = 0; k < 4; k++) {
                 int ii = ci[k], jj = cj[k];
                 int cc = jj * S + ii;
-                float lvl = wl[cc];                       /* water surface here */
+                float lvl = wet[cc] ? wl[cc] : cellL;     /* seca -> nivel del agua, no su terreno */
                 float dep = lvl - W.terr[cc]; if (dep < 0.0f) dep = 0.0f;
                 verts[v].position[0] = cx[k];
                 verts[v].position[1] = lvl;               /* flat at the water level */
