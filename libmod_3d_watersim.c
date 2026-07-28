@@ -43,6 +43,29 @@ static int wsim_cell(float x, float z) {
     return j * W.side + i;
 }
 
+/* Suaviza el relieve del sim (media 3x3). El RUIDO del terreno crea micro-hoyos
+   locales que atrapan el agua y no la dejan fluir cuesta abajo; con el relieve un
+   poco suave el agua no se queda pillada y baja de verdad. */
+static void wsim_smooth_terrain(int passes) {
+    int S = W.side, N = S * S;
+    if (S < 3) return;
+    float *tmp = (float *)malloc((size_t)N * sizeof(float));
+    if (!tmp) return;
+    for (int p = 0; p < passes; p++) {
+        for (int j = 0; j < S; j++) for (int i = 0; i < S; i++) {
+            float sum = 0.0f; int cnt = 0;
+            for (int dj = -1; dj <= 1; dj++) for (int di = -1; di <= 1; di++) {
+                int ni = i+di, nj = j+dj;
+                if (ni < 0 || nj < 0 || ni >= S || nj >= S) continue;
+                sum += W.terr[nj*S+ni]; cnt++;
+            }
+            tmp[j*S+i] = sum / cnt;
+        }
+        memcpy(W.terr, tmp, (size_t)N * sizeof(float));
+    }
+    free(tmp);
+}
+
 static void wsim_free_arrays(void) {
     free(W.terr); free(W.d);
     free(W.fL); free(W.fR); free(W.fT); free(W.fB);
@@ -58,6 +81,7 @@ void g3d_watersim_init(const float *heights, int side, float world_size) {
     W.side = side; W.ws = world_size; W.cell_w = world_size / (float)(side - 1);
     W.terr = (float *)malloc((size_t)N * sizeof(float));
     memcpy(W.terr, heights, (size_t)N * sizeof(float));
+    wsim_smooth_terrain(2);   /* quita micro-hoyos del ruido -> el agua fluye */
     W.d  = (float *)calloc((size_t)N, sizeof(float));
     W.fL = (float *)calloc((size_t)N, sizeof(float));
     W.fR = (float *)calloc((size_t)N, sizeof(float));
@@ -77,6 +101,7 @@ void g3d_watersim_init(const float *heights, int side, float world_size) {
 void g3d_watersim_set_terrain(const float *heights) {
     if (!W.active || !heights) return;
     memcpy(W.terr, heights, (size_t)(W.side * W.side) * sizeof(float));
+    wsim_smooth_terrain(2);   /* mismo suavizado que en init */
 }
 
 void g3d_watersim_shutdown(void) {
