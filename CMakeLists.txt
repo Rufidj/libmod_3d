@@ -35,6 +35,12 @@ if(NOT EMSCRIPTEN AND NOT IS_VITA)
     find_package(SDL2 REQUIRED)
     find_package(SDL2_image REQUIRED)
     find_package(OpenGL REQUIRED)
+    # En Windows (MSYS2/MinGW) las entradas GL modernas (glUniform, glCreateShader...)
+    # no las exporta opengl32; hace falta un cargador -> GLEW. En Linux no (los
+    # prototipos vienen de GL_GLEXT_PROTOTYPES), asi que solo se busca en Windows.
+    if(WIN32)
+        find_package(GLEW REQUIRED)
+    endif()
 endif()
 
 # ============================================================================
@@ -198,4 +204,7 @@ else()
         ${STDLIBSFLAGS}
         -lm
     )
+    if(WIN32)
+        target_link_libraries(mod_3d GLEW::GLEW)   # cargador GL en Windows (MSYS2)
+    endif()
 endif()

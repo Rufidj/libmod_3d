@@ -32,15 +32,18 @@
 #include <string.h>
 #include <math.h>
 
-#ifndef VITA
+#ifdef VITA
+#include "libmod_ray_vita_gl.h"
+#elif defined(_WIN32)
+/* Windows (MSYS2): opengl32 solo exporta GL 1.1; GLEW carga las entradas GL 2.0+ */
+#include <GL/glew.h>
+#else
 /* GL_GLEXT_PROTOTYPES: real prototypes for GL 2.0+ calls (glUniform*, VAO/FBO
    functions). Without them float args to glUniform3f/1f get promoted to double
    and the uniforms receive garbage. */
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>
-#else
-#include "libmod_ray_vita_gl.h"
 #endif
 
 /* ============================================================================
@@ -62,6 +65,14 @@ int g3d_renderer_init(uint32_t width, uint32_t height) {
     }
 
     printf("G3D: Initializing renderer: %ux%u\n", width, height);
+
+#if defined(_WIN32) && !defined(VITA)
+    /* Carga las entradas GL modernas (el contexto ya es actual en este punto). */
+    glewExperimental = GL_TRUE;
+    GLenum gerr = glewInit();
+    if (gerr != GLEW_OK)
+        fprintf(stderr, "G3D: glewInit fallo: %s\n", glewGetErrorString(gerr));
+#endif
 
     memset(&g_renderer, 0, sizeof(G3DRenderer));
 
