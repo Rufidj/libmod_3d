@@ -40,6 +40,29 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* Lee una linea del fichero BYTE A BYTE (fread de 1 byte), hasta '\n' o EOF, sin
+   depender de getline/fgets (portable a Windows y controlado por nosotros). Quita
+   el '\r' final (CRLF de Windows) y termina la cadena en '\0'. `*buf` se agranda
+   segun haga falta (lineas RIVER largas). Devuelve la longitud, o -1 en EOF sin
+   datos. */
+static long read_line(char **buf, size_t *cap, FILE *f) {
+    if (!*buf || *cap == 0) { *cap = 256; *buf = (char *)malloc(*cap); if (!*buf) return -1; }
+    size_t len = 0; unsigned char ch; int got = 0;
+    while (fread(&ch, 1, 1, f) == 1) {
+        got = 1;
+        if (ch == '\n') break;                         /* fin de linea */
+        if (len + 1 >= *cap) {                          /* agranda el buffer */
+            size_t nc = *cap * 2; char *p = (char *)realloc(*buf, nc);
+            if (!p) return -1; *buf = p; *cap = nc;
+        }
+        (*buf)[len++] = (char)ch;
+    }
+    if (!got && len == 0) return -1;                    /* EOF sin nada */
+    if (len > 0 && (*buf)[len - 1] == '\r') len--;      /* CRLF de Windows */
+    (*buf)[len] = '\0';
+    return (long)len;
+}
+
 #define DEG2RAD 0.01745329252f
 
 /* Retained terrain heightfield + water level from the last loaded scene, so a
@@ -185,8 +208,8 @@ int g3d_scene_load(const char *file) {
 
     /* Dynamic line buffer: RIVER lines (hundreds of points) blow past any fixed size. */
     char *line = NULL; size_t line_cap = 0;
-    while (getline(&line, &line_cap, f) != -1) {
-        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') continue;
+    while (read_line(&line, &line_cap, f) != -1) {
+        if (line[0] == '#' || line[0] == '\0') continue;   /* comentario o linea vacia */
 
         if (strncmp(line, "HEIGHTMAP", 9) == 0) {
             /* HEIGHTMAP <file.g3dh> <texture|_>  -> sculpted terrain saved by the
