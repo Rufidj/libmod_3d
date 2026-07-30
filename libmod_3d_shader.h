@@ -84,6 +84,17 @@ G3DShaderProgram *g3d_shader_create(const char *vert_source,
 G3DShaderProgram *g3d_shader_create_tess(const char *vert_source, const char *tcs_source,
                                          const char *tes_source, const char *frag_source);
 
+/* Compute program (GL 4.3 / GLES 3.1). Check g3d_glcaps()->compute first;
+   returns NULL where compute is unavailable. */
+G3DShaderProgram *g3d_shader_create_compute(const char *comp_source);
+
+/* Run a compute program over `gx * gy * gz` work groups. The program must
+   already be bound with g3d_shader_use(). */
+void g3d_shader_dispatch(G3DShaderProgram *program, int gx, int gy, int gz);
+
+/* Wait for compute image writes to be visible to subsequent texture reads. */
+void g3d_shader_image_barrier(void);
+
 /* Load built-in shader (by type) */
 G3DShaderProgram *g3d_shader_load_builtin(G3DShaderType type);
 
@@ -108,6 +119,8 @@ void g3d_shader_set_mat4(G3DShaderProgram *program, const char *name,
 void g3d_shader_set_mat3(G3DShaderProgram *program, const char *name,
                          Mat4 mat);  /* Extract 3x3 from 4x4 */
 
+void g3d_shader_set_vec2(G3DShaderProgram *program, const char *name,
+                         float x, float y);
 void g3d_shader_set_vec3(G3DShaderProgram *program, const char *name,
                          Vec3 vec);
 void g3d_shader_set_vec4(G3DShaderProgram *program, const char *name,

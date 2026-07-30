@@ -14,6 +14,7 @@
 #include "libmod_3d_terrain.h"
 #include "libmod_3d_zone.h"
 #include "libmod_3d_water.h"
+#include "libmod_3d_water_render.h"
 #include "libmod_3d_fire.h"
 #include "libmod_3d_obj.h"
 #include "libmod_3d_fbx.h"
@@ -1406,6 +1407,27 @@ int64_t g3d_set_underwater_bgd(INSTANCE *my, int64_t *params) {
 }
 int64_t g3d_water_set_ocean_bgd(INSTANCE *my, int64_t *params) {
     g3d_water_set_ocean(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+/* Beach surf + swash, from a script. Exported mainly so a running game can be
+   tuned -- and diagnosed -- without rebuilding the engine: setting `amount` to 0
+   turns the whole shore-wave path off in one line, which is the quickest way to
+   tell whether a shoreline artefact comes from it or from somewhere else. */
+int64_t g3d_water_set_surf_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_render_set_surf(*(float *)&params[0], *(float *)&params[1],
+                              *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
+int64_t g3d_water_set_surf_wave_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_render_set_surf_wave(*(float *)&params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_water_set_caustics_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_render_set_caustics(*(float *)&params[0]);
+    return 1;
+}
+int64_t g3d_water_set_underwater_look_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_render_set_underwater(*(float *)&params[0], *(float *)&params[1]);
     return 1;
 }
 int64_t g3d_water_set_tessellation_bgd(INSTANCE *my, int64_t *params) {

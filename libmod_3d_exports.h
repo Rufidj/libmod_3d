@@ -178,6 +178,10 @@ int64_t g3d_water_set_ssr_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_set_underwater_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_ocean_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_tessellation_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_set_surf_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_set_surf_wave_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_set_caustics_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_water_set_underwater_look_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fire_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_fire_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_create_bgd(INSTANCE *my, int64_t *params);
@@ -543,6 +547,11 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_SET_UNDERWATER", "IFFFF", TYPE_INT, g3d_set_underwater_bgd),
     FUNC("G3D_WATER_SET_OCEAN", "FFF", TYPE_INT, g3d_water_set_ocean_bgd),
     FUNC("G3D_WATER_SET_TESSELLATION", "I", TYPE_INT, g3d_water_set_tessellation_bgd),
+    /* olas de playa: intensidad, longitud (en profundidad), velocidad, subida */
+    FUNC("G3D_WATER_SET_SURF", "FFFF", TYPE_INT, g3d_water_set_surf_bgd),
+    FUNC("G3D_WATER_SET_SURF_WAVE", "FF", TYPE_INT, g3d_water_set_surf_wave_bgd),
+    FUNC("G3D_WATER_SET_CAUSTICS", "F", TYPE_INT, g3d_water_set_caustics_bgd),
+    FUNC("G3D_WATER_SET_UNDERWATER_LOOK", "FF", TYPE_INT, g3d_water_set_underwater_look_bgd),
     FUNC("G3D_FIRE_ADD", "FFFF", TYPE_INT, g3d_fire_add_bgd),
     FUNC("G3D_FIRE_CLEAR", "", TYPE_INT, g3d_fire_clear_bgd),
     FUNC("G3D_WATER_CREATE", "FFI", TYPE_INT, g3d_water_create_bgd),

@@ -166,6 +166,16 @@ G3DMesh *g3d_fluid_build_river(const float *pts, int n, const float *heights,
                                int side, float world_size, float width,
                                float *out_depth);
 
+/* Make sure the unified water field exists, starting it from the scene's terrain
+   if it does not. Returns 1 if a field is available afterwards, 0 if the scene
+   has no terrain to build one over. Cheap and idempotent.
+
+   Every entry point that places water should call this FIRST. Merely checking
+   "is the field active?" and otherwise falling back to the old zone meshes means
+   the result depends on the order the caller happened to do things in -- generate
+   the terrain before enabling water and you silently get the legacy lakes. */
+int g3d_water_ensure_field(void);
+
 /* Free GPU resources. */
 void g3d_water_shutdown(void);
 

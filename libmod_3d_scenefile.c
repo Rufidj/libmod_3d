@@ -30,6 +30,7 @@
 #include "libmod_3d_renderer.h"
 #include "libmod_3d_sky.h"
 #include "libmod_3d_water.h"
+#include "libmod_3d_water_field.h"
 #include "libmod_3d_watersim.h"
 #include "libmod_3d_voxterrain.h"
 #include "libmod_3d_flow.h"
@@ -642,6 +643,16 @@ int g3d_lake_add(float seed_x, float seed_z, float surface_y, float depth) {
 int g3d_lake_add_r(float seed_x, float seed_z, float surface_y, float depth, float max_radius) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2) return -1;
+
+    /* With the unified field up, a lake is simply water in the field: pour it in
+       and it behaves like every other body -- it joins a river, spills over a
+       ledge as a waterfall, merges with the sea. Building a separate mesh here
+       would put a second, differently-shaded surface on top of the same water. */
+    if (g3d_water_ensure_field()) {
+        int cells = g3d_waterfield_fill_basin(seed_x, seed_z, surface_y, max_radius);
+        return cells > 0 ? 0 : -1;
+    }
+
     unsigned char *filled = (unsigned char *)calloc((size_t)side * side, 1);
     float d = depth;
     const unsigned char *blk = (g_fluid_block && g_fluid_block_side == side) ? g_fluid_block : NULL;
@@ -688,6 +699,21 @@ int g3d_river_add(const float *pts_xyz, int n, float width) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2 || n < 2) return -1;
     if (width < 0.1f) width = 3.0f;
+
+    /* Same reasoning as lakes: pour the course into the unified field and let it
+       be water. It then reaches the sea, pools where the ground dips, and falls
+       over ledges on its own, instead of being a ribbon mesh that has to be
+       stitched to the other water by hand. */
+    if (g3d_water_ensure_field()) {
+        /* No spring at the head. A placed channel keeps its own water now (it
+           will not give away the volume it was authored with), so it stays put
+           on its own. Feeding it instead meant pouring width*0.25 units/s in
+           forever -- 2.85/s for an 11-unit river -- which is exactly how the
+           rivers overflowed once a game was left running. */
+        int cells = g3d_waterfield_add_channel(pts_xyz, n, width);
+        return cells > 0 ? 0 : -1;
+    }
+
     float depth = 1.0f;
     G3DMesh *rm = g3d_fluid_build_river(pts_xyz, n, H, side, ws, width, &depth);
     if (rm) g3d_fluid_add_mesh(rm, depth);              /* superficie del cauce   */
@@ -704,6 +730,12 @@ int g3d_river_add_falls(const float *pts_xyz, int n, float width) {
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2 || n < 2) return -1;
     if (width < 0.1f) width = 3.0f;
+
+    /* Nothing to do with a unified field: the river's water is already IN it,
+       so wherever the course crosses a ledge a curtain appears on its own.
+       Adding the legacy ribbons here as well would hang the old flat sheets in
+       front of the new ones. */
+    if (g3d_waterfield_active()) return 0;
     g3d_river_add_waterfalls(pts_xyz, n, H, side, ws, width);
     return 0;
 }

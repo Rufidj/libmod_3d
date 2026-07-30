@@ -3,6 +3,8 @@
  */
 
 #include "libmod_3d_water.h"
+#include "libmod_3d_water_field.h"
+#include "libmod_3d_scenefile.h"
 #include "libmod_3d_watersim.h"   /* flotacion en el agua que fluye (sim) */
 #include "libmod_3d_shader.h"
 #include "libmod_3d_mesh.h"
@@ -464,6 +466,8 @@ static struct {
     G3DShaderProgram *shader;
     G3DMesh *mesh;
     float level;
+    float legacy_level;   /* last level asked for, to restore on re-enable */
+    float legacy_size;    /* ...and the extent, for the open-sea fallback        */
     float wave_amp;
     float wave_len;
     float wave_speed;
@@ -582,7 +586,90 @@ int g3d_water_reflection_enabled(void) {
 
 float g3d_water_get_level(void) { return g_water.level; }
 
+/* Start the unified water field from the scene's terrain, so that asking for a
+   sea through the legacy API produces the NEW water.
+ *
+ * Deliberately cheap and idempotent, because it has to be called from every
+ * entry point that could mean "there is water now" -- not just creation. The
+ * editor only calls g3d_water_create() when the LEVEL changes, so a project
+ * loaded with water already enabled never creates anything and would be stuck on
+ * the legacy plane forever; it does, however, call g3d_water_set_enabled(1)
+ * every frame. Terrain and water can also arrive in either order, so this
+ * retries harmlessly until a terrain exists. */
+int g3d_water_ensure_field(void) {
+    if (g3d_waterfield_active()) return 1;
+    const float *H = NULL;
+    int side = 0;
+    float ws = 0.0f;
+    if (!g3d_scene_heightfield(&H, &side, &ws) || side < 2 || ws <= 0.0f)
+        return 0;                      /* no terrain yet: try again next frame */
+    if (!g3d_waterfield_init(H, side, ws))
+        return 0;
+    printf("G3D: unified water field started from the scene terrain "
+           "(%dx%d over %.0f units)\n", side, side, ws);
+    return 1;
+}
+
+/* Open water with no terrain under it: a script that just asks for a sea.
+   The renderer draws whatever the field says is wet, so a scene with no terrain
+   has nothing to draw at all unless we give it a seabed. A coarse flat floor
+   well below the surface is enough -- with no coastline there is no detail to
+   resolve -- and it means a plain G3D_WATER_CREATE gets the new water instead of
+   silently falling back to the legacy plane. */
+static int g_field_is_open_sea = 0;   /* built without a terrain (see below) */
+
+static int water_ensure_field_or_open_sea(float level, float size) {
+    /* A synthetic open sea must never squat on the slot the real terrain wants.
+       The two can arrive in either order -- a host that enables water on frame
+       one and registers its terrain slightly later would otherwise be stuck with
+       a flat 4000-unit ocean and its actual landscape drowned under it. */
+    if (g_field_is_open_sea) {
+        const float *H2 = NULL; int side2 = 0; float ws2 = 0.0f;
+        if (g3d_scene_heightfield(&H2, &side2, &ws2) && side2 >= 2 && ws2 > 0.0f) {
+            g3d_waterfield_shutdown();
+            g_field_is_open_sea = 0;
+            printf("G3D: terrain appeared; rebuilding the water field over it\n");
+        }
+    }
+    if (g3d_water_ensure_field()) { g_field_is_open_sea = 0; return 1; }
+    const int SIDE = 129;
+    float extent = size > 1.0f ? size : 1000.0f;
+    float *flat = (float *)malloc((size_t)SIDE * SIDE * sizeof(float));
+    if (!flat) return 0;
+    float floor_y = level - 60.0f;
+    for (int i = 0; i < SIDE * SIDE; i++) flat[i] = floor_y;
+    int ok = g3d_waterfield_init(flat, SIDE, extent);
+    free(flat);
+    if (ok) {
+        g_field_is_open_sea = 1;
+        printf("G3D: unified water field started as open sea "
+               "(no terrain; %.0f units, floor at %.1f)\n", extent, floor_y);
+    }
+    return ok;
+}
+
+static void water_bootstrap_field(float level) {
+    if (!water_ensure_field_or_open_sea(level, g_water.legacy_size)) return;
+    g3d_waterfield_set_sea_level(level);
+    /* Fill it now, so the sea is there on the first frame rather than creeping
+       in over the next few seconds. */
+    g3d_waterfield_settle(0.5f);
+}
+
 int g3d_water_create(float level, float size, int subdiv) {
+    /* Hand the sea to the unified field, which owns the water when it exists.
+     *
+     * If there is no field yet but the scene HAS a terrain, start one here. That
+     * is what makes asking for a sea produce the new water rather than the
+     * legacy plane: callers (the editor's water checkbox, G3D_WATER_CREATE in a
+     * script) generally never touch the field API directly, so without this they
+     * would silently keep the old flat surface forever. With no terrain at all
+     * there is nothing to build a field over, and the legacy plane below still
+     * serves as the fallback. */
+    g_water.legacy_level = level;
+    g_water.legacy_size = size;
+    water_bootstrap_field(level);
+
     if (subdiv < 2)
         subdiv = 2;
     if (subdiv > 250)
@@ -633,11 +720,35 @@ void g3d_water_set_color(float dr, float dg, float db, float sr, float sg,
     g_water.shallow[0] = sr; g_water.shallow[1] = sg; g_water.shallow[2] = sb;
 }
 
-void g3d_water_set_enabled(int enabled) { g_water.enabled = enabled; }
+void g3d_water_set_enabled(int enabled) {
+    g_water.enabled = enabled;
+    if (enabled) {
+        /* This is the reliable hook: callers poke it every frame, whereas
+           g3d_water_create() may never run again after the first time. */
+        water_bootstrap_field(g_water.legacy_level);
+    } else if (g3d_waterfield_active()) {
+        /* Turning the legacy sea off must drain the field's sea too. */
+        g3d_waterfield_set_sea_level(G3D_NO_WATER);
+    }
+}
 
 int g3d_water_is_enabled(void) { return g_water.enabled && g_water.initialized; }
 
 void g3d_water_render_pass(G3DCamera *camera, int flip_y) {
+    /* Retry the hand-over every frame while the legacy water is enabled.
+       A script calls G3D_WATER_CREATE exactly once, and if the terrain was not
+       registered yet at that moment the field could not be built -- with no
+       retry the scene would keep the legacy plane for its whole run. */
+    if (g_water.enabled && !g3d_waterfield_active())
+        water_bootstrap_field(g_water.legacy_level);
+
+    /* The unified water field owns the water wherever it exists, sea included.
+       Callers that set up both (the editor drives the legacy global plane AND
+       the field's sea level from the same checkbox) would otherwise get two
+       surfaces at the same height, z-fighting and double-blending. */
+    if (g3d_waterfield_active())
+        return;
+
     if (!g_water.enabled || !g_water.initialized || !g_water.shader ||
         !g_water.mesh || !camera)
         return;
@@ -802,6 +913,11 @@ static void fluid_zone_capture_style(FluidZone *z) {
 }
 
 void g3d_fluid_clear(void) {
+    /* The editor rebuilds its water by clearing and re-adding everything, so
+       this must release the placed-water holds too -- otherwise a lake the user
+       deleted keeps being topped up forever and never disappears. */
+    g3d_waterfield_clear_holds();
+    g3d_waterfield_clear_springs_tagged(G3D_WF_TAG_RIVER);
     for (int i = 0; i < g_fluid.count; i++)
         if (g_fluid.zones[i].mesh) { g3d_mesh_free(g_fluid.zones[i].mesh); g_fluid.zones[i].mesh = NULL; }
     g_fluid.count = 0;
@@ -813,6 +929,21 @@ int g3d_fluid_count(void) { return g_fluid.count; }
    renderer's underwater post-process. Called by the renderer each frame. */
 void g3d_water_update_underwater(G3DCamera *camera) {
     if (!camera) return;
+
+    /* Ask the field. It knows about every kind of water -- sea, lake, river,
+       the pool under a waterfall -- so submersion is one query instead of a
+       plane height plus a list of zone boxes. Those zones are empty now that
+       lakes live in the field, which would leave a swimmer in a lake reported
+       as being in open air. */
+    if (g3d_waterfield_active()) {
+        Vec3 cp = camera->position;
+        float lvl = g3d_waterfield_level_at(cp.x, cp.z);
+        int in = (lvl > G3D_NO_WATER_TEST) && (cp.y < lvl);
+        g3d_renderer_set_underwater(in, g_water.deep[0], g_water.deep[1],
+                                    g_water.deep[2], 1.0f);
+        return;
+    }
+
     /* No water plane or fluid zone registered (e.g. ocean/watersim-only scenes):
        don't override manual g3d_set_underwater control. */
     if (!(g_water.enabled && g_water.initialized) && g_fluid.count == 0)
@@ -935,6 +1066,15 @@ int g3d_fluid_get_kind(void) { return g_fluid.kind; }
 
 void g3d_fluid_render_pass(G3DCamera *camera, int flip_y) {
 #ifndef VITA
+    /* Lakes and rivers are poured into the unified field now (see g3d_lake_add_r
+       and g3d_river_add), so any zone meshes still hanging around describe water
+       the field is already drawing. Rendering them too would stack a second,
+       differently shaded surface on the same water.
+       Manual waterfalls are NOT covered by this: g3d_waterfall_add still builds
+       flow ribbons, and g3d_flow_render_pass deliberately keeps drawing them. */
+    if (g3d_waterfield_active())
+        return;
+
     /* unit_mesh is only needed by rectangle zones; lake zones carry their own
        mesh, so don't gate the whole pass on it. */
     if (g_fluid.count == 0 || !camera)

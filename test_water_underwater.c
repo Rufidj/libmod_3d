@@ -1,0 +1,97 @@
+/* Sumergir la camara debe cambiar la imagen: absorcion por distancia, y el ROJO
+   se va mucho antes que el azul (es lo que distingue estar bajo el agua de
+   mirar a traves de un filtro azul). Fuera del agua no debe tocar nada. */
+#include <SDL2/SDL.h>
+#define GL_GLEXT_PROTOTYPES
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include "libmod_3d_water_field.h"
+#include "libmod_3d_water_render.h"
+#include "libmod_3d_renderer.h"
+#include "libmod_3d_camera.h"
+#define S 129
+#define WS 200.0f
+#define VW 512
+#define VH 320
+static float terr[S*S];
+static int fails=0;
+static void check(const char*w,int ok,const char*d){
+    printf("  [%s] %s%s%s\n",ok?"PASS":"FAIL",w,d&&*d?" -- ":"",d?d:""); if(!ok)fails++; }
+static const char*qv="#version 330 core\nlayout(location=0) in vec3 p;\nuniform mat4 uVP;\nvoid main(){gl_Position=uVP*vec4(p,1.0);}\n";
+static const char*qf="#version 330 core\nout vec4 c;\nvoid main(){c=vec4(0.75,0.70,0.62,1.0);}\n";
+int main(void){
+    SDL_Init(SDL_INIT_VIDEO);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION,4);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION,3);
+    SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE,24);
+    SDL_Window*w=SDL_CreateWindow("u",0,0,VW,VH,SDL_WINDOW_OPENGL|SDL_WINDOW_HIDDEN);
+    SDL_GLContext gc=SDL_GL_CreateContext(w);
+    GLuint fbo,col,dep;
+    glGenTextures(1,&col); glBindTexture(GL_TEXTURE_2D,col);
+    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA8,VW,VH,0,GL_RGBA,GL_UNSIGNED_BYTE,NULL);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
+    glGenRenderbuffers(1,&dep); glBindRenderbuffer(GL_RENDERBUFFER,dep);
+    glRenderbufferStorage(GL_RENDERBUFFER,GL_DEPTH_COMPONENT24,VW,VH);
+    glGenFramebuffers(1,&fbo); glBindFramebuffer(GL_FRAMEBUFFER,fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER,GL_COLOR_ATTACHMENT0,GL_TEXTURE_2D,col,0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER,GL_DEPTH_ATTACHMENT,GL_RENDERBUFFER,dep);
+    for(int i=0;i<S*S;i++) terr[i]=-14.0f;
+    g3d_waterfield_init(terr,S,WS);
+    g3d_waterfield_set_sea_level(0.0f);
+    g3d_waterfield_settle(2.0f);
+    GLuint p=glCreateProgram(),vs=glCreateShader(GL_VERTEX_SHADER),fs=glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(vs,1,&qv,0); glCompileShader(vs); glShaderSource(fs,1,&qf,0); glCompileShader(fs);
+    glAttachShader(p,vs); glAttachShader(p,fs); glLinkProgram(p);
+    float q[]={-90,-14,-90, 90,-14,-90, 90,-14,90, -90,-14,-90, 90,-14,90, -90,-14,90};
+    GLuint va,vb; glGenVertexArrays(1,&va); glGenBuffers(1,&vb);
+    glBindVertexArray(va); glBindBuffer(GL_ARRAY_BUFFER,vb);
+    glBufferData(GL_ARRAY_BUFFER,sizeof q,q,GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0); glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,0,0);
+    unsigned char*px=malloc(VW*VH*4);
+    double R_[2],G_[2],B_[2];
+    for(int pass=0;pass<2;pass++){
+        G3DCamera*cam=g3d_camera_impl_create(0);
+        /* Las dos pasadas con la camara SUMERGIDA; lo unico que cambia es la
+           visibilidad. Comparar contra la camara fuera del agua no aisla nada:
+           ahi la propia superficie azul domina la medida. */
+        g3d_water_render_set_underwater(pass==0 ? 1.0e6f : 22.0f, 0.0f);
+        cam->position = vec3_make(0,-5,40);
+        cam->fov=60; cam->near_plane=0.1f; cam->far_plane=600;
+        cam->aspect_ratio=(float)VW/VH;
+        g3d_camera_look_at_impl(cam,vec3_make(0,-12,0),vec3_make(0,1,0));
+        g3d_camera_update(cam);
+        glViewport(0,0,VW,VH);
+        glClearColor(0.45f,0.62f,0.85f,1.0f);
+        glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_DEPTH_TEST); glDepthMask(GL_TRUE); glDisable(GL_BLEND);
+        Mat4 vp=mat4_multiply(g3d_camera_get_projection(cam),g3d_camera_get_view(cam));
+        glUseProgram(p); glUniformMatrix4fv(glGetUniformLocation(p,"uVP"),1,GL_FALSE,vp.m);
+        glBindVertexArray(va); glDrawArrays(GL_TRIANGLES,0,6); glBindVertexArray(0);
+        g3d_renderer_capture_scene(); g3d_renderer_capture_depth();
+        g3d_water_render(cam,0);
+        glReadPixels(0,0,VW,VH,GL_RGBA,GL_UNSIGNED_BYTE,px);
+        double r=0,g=0,b=0;
+        for(int i=0;i<VW*VH;i++){r+=px[i*4];g+=px[i*4+1];b+=px[i*4+2];}
+        R_[pass]=r/(VW*VH); G_[pass]=g/(VW*VH); B_[pass]=b/(VW*VH);
+        if(pass==1){FILE*f=fopen("/tmp/under.ppm","wb"); fprintf(f,"P6\n%d %d\n255\n",VW,VH);
+            for(int y=VH-1;y>=0;y--)for(int x=0;x<VW;x++)fwrite(&px[(y*VW+x)*4],1,3,f); fclose(f);}
+    }
+    char b[200];
+    printf("1. camara sumergida\n");
+    snprintf(b,sizeof b,"sin niebla R=%.0f G=%.0f B=%.0f | con niebla R=%.0f G=%.0f B=%.0f",
+             R_[0],G_[0],B_[0],R_[1],G_[1],B_[1]);
+    printf("   %s\n",b);
+    check("la niebla submarina cambia la imagen",
+          fabs(R_[1]-R_[0])+fabs(G_[1]-G_[0])+fabs(B_[1]-B_[0]) > 25.0, "");
+    check("el rojo se absorbe mas que el azul",
+          (R_[0]-R_[1]) > (B_[0]-B_[1]), "absorcion por canal");
+    int e=0; while(glGetError()!=GL_NO_ERROR) e++;
+    check("sin errores GL", e==0, "");
+    printf("\n%s (%d fallo%s)\n",fails?"FALLOS":"TODO OK",fails,fails==1?"":"s");
+    return fails?1:0;
+}

@@ -5,6 +5,7 @@
  */
 
 #include "libmod_3d_shader.h"
+#include "libmod_3d_glcaps.h"
 #include "libmod_3d_cloud_glsl.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,6 +26,21 @@
 #include <GL/gl.h>
 #include <GL/glext.h>
 #endif
+#endif
+
+/* Compute-stage constants, guarded so this file still builds against a GLES2 or
+   GL 2.1 header set (the code using them is runtime-gated on caps->compute). */
+#ifndef GL_COMPUTE_SHADER
+#define GL_COMPUTE_SHADER 0x91B9
+#endif
+#ifndef GL_SHADER_IMAGE_ACCESS_BARRIER_BIT
+#define GL_SHADER_IMAGE_ACCESS_BARRIER_BIT 0x00000020
+#endif
+#ifndef GL_TEXTURE_FETCH_BARRIER_BIT
+#define GL_TEXTURE_FETCH_BARRIER_BIT 0x00000008
+#endif
+#ifndef GL_TEXTURE_UPDATE_BARRIER_BIT
+#define GL_TEXTURE_UPDATE_BARRIER_BIT 0x00000100
 #endif
 
 /* ============================================================================
@@ -207,6 +223,62 @@ G3DShaderProgram *g3d_shader_create_tess(const char *vert_source, const char *tc
     printf("G3D: Tess shader program linked (id=%d)\n", program->id);
     return program;
 }
+
+/* Compute program. The compute stage is stored in vertex_shader so the normal
+   g3d_shader_free() path deletes it. */
+G3DShaderProgram *g3d_shader_create_compute(const char *comp_source) {
+    if (!g3d_glcaps()->compute) {
+        fprintf(stderr, "G3D: compute shaders unavailable on this GL context\n");
+        return NULL;
+    }
+    G3DShaderProgram *program = (G3DShaderProgram *)malloc(sizeof(G3DShaderProgram));
+    if (!program) return NULL;
+    memset(program, 0, sizeof(G3DShaderProgram));
+
+    program->vertex_shader.type = GL_COMPUTE_SHADER;
+    program->vertex_shader.source = comp_source;
+    if (!g3d_shader_compile(&program->vertex_shader)) {
+        fprintf(stderr, "G3D: compute shader compile failed\n%s\n",
+                program->vertex_shader.error_log);
+        free(program); return NULL;
+    }
+
+    program->id = glCreateProgram();
+    glAttachShader(program->id, program->vertex_shader.id);
+    glLinkProgram(program->id);
+    int linked; glGetProgramiv(program->id, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        char log[1024]; glGetProgramInfoLog(program->id, sizeof(log), NULL, log);
+        fprintf(stderr, "G3D: compute program link failed:\n%s\n", log);
+        glDeleteProgram(program->id);
+        glDeleteShader(program->vertex_shader.id);
+        free(program); return NULL;
+    }
+    program->linked = 1;
+    printf("G3D: Compute shader program linked (id=%d)\n", program->id);
+    return program;
+}
+
+void g3d_shader_dispatch(G3DShaderProgram *program, int gx, int gy, int gz) {
+    if (!program || !program->linked) return;
+    if (gx < 1) gx = 1; if (gy < 1) gy = 1; if (gz < 1) gz = 1;
+    glDispatchCompute((GLuint)gx, (GLuint)gy, (GLuint)gz);
+}
+
+void g3d_shader_image_barrier(void) {
+    /* TEXTURE_UPDATE matters as much as the other two: without it, results
+       written by imageStore are not guaranteed to be visible to glGetTexImage,
+       glTexSubImage or glGenerateMipmap. Leaving it out mostly "works" and then
+       hands back garbage on the first read after a dispatch, which reads as a
+       broken compute shader rather than as the missing barrier it is. */
+    glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
+                    GL_TEXTURE_FETCH_BARRIER_BIT |
+                    GL_TEXTURE_UPDATE_BARRIER_BIT);
+}
+#else
+G3DShaderProgram *g3d_shader_create_compute(const char *comp_source) { (void)comp_source; return NULL; }
+void g3d_shader_dispatch(G3DShaderProgram *p, int gx, int gy, int gz) { (void)p; (void)gx; (void)gy; (void)gz; }
+void g3d_shader_image_barrier(void) {}
 #endif
 
 void g3d_shader_free(G3DShaderProgram *program) {
@@ -323,6 +395,20 @@ void g3d_shader_set_mat3(G3DShaderProgram *program, const char *name,
 
 #ifndef VITA
     glUniformMatrix3fv(loc, 1, GL_FALSE, mat3);
+#endif
+}
+
+void g3d_shader_set_vec2(G3DShaderProgram *program, const char *name,
+                         float x, float y) {
+    if (!program)
+        return;
+
+    int loc = g3d_shader_get_uniform(program, name);
+    if (loc < 0)
+        return;
+
+#ifndef VITA
+    glUniform2f(loc, x, y);
 #endif
 }
 

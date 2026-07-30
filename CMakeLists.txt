@@ -79,6 +79,7 @@ endif()
 set(SOURCES_LIBMOD_3D
     libmod_3d.c
     libmod_3d_math.c
+    libmod_3d_glcaps.c
     libmod_3d_shader.c
     libmod_3d_texture.c
     libmod_3d_mesh.c
@@ -120,6 +121,10 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_chunkterrain.c
     libmod_3d_fluidfill.c
     libmod_3d_watersim.c
+    libmod_3d_water_field.c
+    libmod_3d_water_render.c
+    libmod_3d_water_spectrum.c
+    libmod_3d_water_falls.c
     libmod_3d_cave.c
     libmod_3d_voxterrain.c
 )

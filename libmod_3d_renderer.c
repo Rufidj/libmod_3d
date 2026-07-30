@@ -5,6 +5,7 @@
  */
 
 #include "libmod_3d_renderer.h"
+#include "libmod_3d_glcaps.h"
 #include "libmod_3d_shader.h"
 #include "libmod_3d_mesh.h"
 #include "libmod_3d_scene.h"
@@ -218,13 +219,7 @@ int g3d_renderer_init(uint32_t width, uint32_t height) {
     g_renderer.initialized = 1;
 
 #ifndef VITA
-    {
-        const char *ver = (const char *)glGetString(GL_VERSION);
-        const char *ren = (const char *)glGetString(GL_RENDERER);
-        GLint major = 0; glGetIntegerv(GL_MAJOR_VERSION, &major);
-        printf("G3D: GL_VERSION = %s  |  GL_RENDERER = %s\n", ver ? ver : "?", ren ? ren : "?");
-        printf("G3D: Tessellation (GL4) %s\n", major >= 4 ? "AVAILABLE" : "NOT available (needs GL 4.0)");
-    }
+    g3d_glcaps_print();   /* GL version, feature flags and the chosen quality tier */
 #endif
     printf("G3D: Renderer initialized\n");
 
@@ -687,9 +682,38 @@ void g3d_renderer_spot_shadow_pass(void) {
 uint32_t g3d_renderer_reflection_texture(void) { return g_renderer.refl_texture; }
 uint32_t g3d_renderer_scene_texture(void) { return g_renderer.scene_texture; }
 
+/* Rectangle the scene is actually being drawn into, which is what the screen-space
+   passes (water refraction and SSR, mirrors) must capture.
+ *
+ * It is NOT always render_width x render_height: a host that renders into its own
+ * framebuffer -- the editor draws the scene into its viewport texture -- sets the
+ * physical viewport WITHOUT changing the nominal render size. Capturing the
+ * nominal size then grabs a rectangle that does not line up with what was drawn,
+ * and anything reconstructing a screen UV from clip space samples the wrong
+ * texels, which shows up as hard screen-aligned rectangles across the water. */
+static void renderer_capture_rect(int *x, int *y, uint32_t *w, uint32_t *h) {
+    /* Ask GL what the viewport actually is, rather than reconstructing it from
+       our own bookkeeping. A screen UV recovered from clip space is by definition
+       relative to the live viewport, so this is the one answer that is always
+       right -- including for hosts that never tell us their size. The editor is
+       exactly that case: it sets the physical viewport for its scene panel but
+       never calls g3d_renderer_set_viewport_size, so render_width stays at
+       whatever the window was on startup. */
+    GLint vp[4] = { 0, 0, 0, 0 };
+    glGetIntegerv(GL_VIEWPORT, vp);
+    if (vp[2] > 0 && vp[3] > 0) {
+        *x = vp[0]; *y = vp[1];
+        *w = (uint32_t)vp[2]; *h = (uint32_t)vp[3];
+    } else {
+        *x = 0; *y = 0;
+        *w = g_renderer.render_width; *h = g_renderer.render_height;
+    }
+}
+
 uint32_t g3d_renderer_capture_scene(void) {
 #ifndef VITA
-    uint32_t w = g_renderer.render_width, h = g_renderer.render_height;
+    int cx, cy; uint32_t w, h;
+    renderer_capture_rect(&cx, &cy, &w, &h);
     if (w == 0 || h == 0) return 0;
     if (!g_renderer.scene_texture) {
         glGenTextures(1, &g_renderer.scene_texture);
@@ -703,10 +727,10 @@ uint32_t g3d_renderer_capture_scene(void) {
     glBindTexture(GL_TEXTURE_2D, g_renderer.scene_texture);
     /* Copy the current colour buffer (the opaque scene) into the texture. */
     if (w != g_renderer.scene_tex_w || h != g_renderer.scene_tex_h) {
-        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, 0, 0, (GLsizei)w, (GLsizei)h, 0);
+        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, cx, cy, (GLsizei)w, (GLsizei)h, 0);
         g_renderer.scene_tex_w = w; g_renderer.scene_tex_h = h;
     } else {
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, (GLsizei)w, (GLsizei)h);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cx, cy, (GLsizei)w, (GLsizei)h);
     }
     glBindTexture(GL_TEXTURE_2D, 0);
     return g_renderer.scene_texture;
@@ -717,7 +741,8 @@ uint32_t g3d_renderer_capture_scene(void) {
 
 uint32_t g3d_renderer_capture_depth(void) {
 #ifndef VITA
-    uint32_t w = g_renderer.render_width, h = g_renderer.render_height;
+    int cx, cy; uint32_t w, h;
+    renderer_capture_rect(&cx, &cy, &w, &h);   /* same rect as the colour copy */
     if (w == 0 || h == 0) return 0;
     if (!g_renderer.scene_depth_tex) {
         glGenTextures(1, &g_renderer.scene_depth_tex);
@@ -730,10 +755,10 @@ uint32_t g3d_renderer_capture_depth(void) {
     }
     glBindTexture(GL_TEXTURE_2D, g_renderer.scene_depth_tex);
     if (w != g_renderer.scene_depth_w || h != g_renderer.scene_depth_h) {
-        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, 0, 0, (GLsizei)w, (GLsizei)h, 0);
+        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, cx, cy, (GLsizei)w, (GLsizei)h, 0);
         g_renderer.scene_depth_w = w; g_renderer.scene_depth_h = h;
     } else {
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, (GLsizei)w, (GLsizei)h);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cx, cy, (GLsizei)w, (GLsizei)h);
     }
     glBindTexture(GL_TEXTURE_2D, 0);
     return g_renderer.scene_depth_tex;

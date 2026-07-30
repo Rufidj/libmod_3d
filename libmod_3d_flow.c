@@ -3,6 +3,8 @@
  */
 
 #include "libmod_3d_flow.h"
+#include "libmod_3d_water_field.h"
+#include "libmod_3d_water.h"
 #include "libmod_3d_shader.h"
 #include "libmod_3d_math.h"
 #include "libmod_3d_terrain.h"
@@ -303,6 +305,19 @@ int g3d_flow_add(float tx, float ty, float tz, float bx, float by, float bz,
 int g3d_waterfall_add(float tx, float ty, float tz, float bx, float bz, float width, float arc) {
     float by = ty;
 #ifndef VITA
+    /* With the unified field, a placed waterfall becomes a SPRING at the lip:
+       water then really flows over the ledge and the curtain, the pool at the
+       bottom and the stream leaving it all follow from the simulation. A ribbon
+       mesh here would just be a flat sheet pinned in mid-air, unconnected to any
+       of the water around it. */
+    if (g3d_water_ensure_field()) {
+        /* Tagged, so g3d_flow_clear() can retire exactly these. The editor
+           rebuilds its water on every edit, and an untagged spring per rebuild
+           accumulates without bound -- which floods the whole map. */
+        float rate = width > 0.5f ? width * 0.6f : 0.6f;
+        return g3d_waterfield_add_spring_tagged(tx, tz, rate, G3D_WF_TAG_WATERFALL) >= 0 ? 0 : -1;
+    }
+
     /* base: terreno en (bx,bz), o la superficie del agua si la hay (mas alta) */
     const float *H = NULL; int side = 0; float ws = 0.0f;
     if (g3d_scene_heightfield(&H, &side, &ws) && side >= 2)
@@ -542,6 +557,13 @@ void g3d_river_add_waterfalls(const float *pts, int n, const float *H,
 }
 
 void g3d_flow_render_pass(G3DCamera *camera, int flip_y) {
+    /* The unified field draws every fall itself (libmod_3d_water_falls.c), so
+       any legacy ribbons still registered describe water that is already on
+       screen. Drawing them too puts the old flat sheets in front of the new
+       curtains, which is exactly the "old waterfalls keep showing up" symptom. */
+    if (g3d_waterfield_active())
+        return;
+
     if (!g_flow.initialized || !g_flow.shader || g_flow.count == 0 || !camera)
         return;
 
@@ -616,6 +638,7 @@ void g3d_flow_render_pass(G3DCamera *camera, int flip_y) {
 }
 
 void g3d_flow_clear(void) {
+    g3d_waterfield_clear_springs_tagged(G3D_WF_TAG_WATERFALL);
 #ifndef VITA
     for (int i = 0; i < g_flow.count; i++) {
         FlowQuad *q = &g_flow.quads[i];
