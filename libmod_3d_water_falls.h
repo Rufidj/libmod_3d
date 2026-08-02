@@ -32,6 +32,12 @@ void g3d_water_falls_set_threshold(float drop);
 /* Foam and landing-mist intensity (both default 1). */
 void g3d_water_falls_set_style(float foam, float mist);
 
+/* Where the falls LAND. Fills `out` with up to `max` entries of
+   { x, y, z, fall_height, width } and returns how many. This is what the spray
+   at the foot of a waterfall is placed with -- same source as the curtains, so
+   it cannot drift off them. */
+int g3d_water_falls_feet(float *out, int max);
+
 /* How many sheets are currently being drawn, for tests and tooling. */
 int g3d_water_falls_count(void);
 

@@ -32,6 +32,7 @@
 
 #define WF_MAX_SHEETS 4096
 #define WF_FLOATS_PER_VERT 6      /* xyz + (u, v, fallHeight) */
+#define WF_MAX_FEET 256
 
 static struct {
     int inited, failed;
@@ -42,6 +43,12 @@ static struct {
     unsigned int field_rev;       /* field revision the geometry reflects */
     float threshold;
     float foam, mist;
+
+    /* Where each fall LANDS: x, y, z, height, width. The spray at the foot of a
+       waterfall has to come from the same place the curtain does, or it drifts
+       off it as soon as the river shifts. */
+    float feet[WF_MAX_FEET * 5];
+    int   nfeet;
 } F = { .threshold = 1.5f, .foam = 1.0f, .mist = 1.0f };
 
 static char *falls_src(const char *body, int frag) {
@@ -103,8 +110,18 @@ static void falls_edge(int i, int j, int di, int dj, int S, float ws, float cell
 }
 
 /* Rebuild the sheets from the current field. */
+static void falls_build(void);
+
+/* Rebuild only when the field really changed. Both the curtains and the spray
+   at their feet come off the same build, so neither can drift from the other. */
+static void falls_build_if_needed(void) {
+    unsigned int rev = g3d_waterfield_revision();
+    if (rev != F.field_rev) { F.field_rev = rev; falls_build(); }
+}
+
 static void falls_build(void) {
     F.sheets = 0;
+    F.nfeet = 0;
     if (!g3d_waterfield_active()) return;
 
     int S = g3d_waterfield_side();
@@ -182,6 +199,22 @@ static void falls_build(void) {
             if (nchain == 0) continue;
             float total = top - chainBot[nchain - 1];
             if (total < F.threshold) continue;           /* a slope, not a fall */
+
+            /* Record the landing point before splitting into branches: both
+               paths end at the same place, and the spray only cares about that. */
+            if (F.nfeet < WF_MAX_FEET) {
+                int lc = chainCell[nchain - 1], lk = chainDir[nchain - 1];
+                float ex0, ez0, ex1, ez1;
+                falls_edge(lc % S, lc / S, di[lk], dj[lk], S, ws, cell,
+                           &ex0, &ez0, &ex1, &ez1);
+                float *ft = &F.feet[F.nfeet * 5];
+                ft[0] = (ex0 + ex1) * 0.5f;
+                ft[1] = chainBot[nchain - 1];
+                ft[2] = (ez0 + ez1) * 0.5f;
+                ft[3] = total;
+                ft[4] = cell;
+                F.nfeet++;
+            }
 
             /* A near-vertical drop becomes ONE sheet hanging at the lip, all the
                way down to where the water lands.
@@ -271,8 +304,7 @@ void g3d_water_falls_render(G3DCamera *camera, int flip_y) {
         F.field_rev = 0;
     }
 
-    unsigned int rev = g3d_waterfield_revision();
-    if (rev != F.field_rev) { F.field_rev = rev; falls_build(); }
+    falls_build_if_needed();
     if (F.sheets <= 0) return;
 
     Mat4 view = g3d_camera_get_view(camera);
@@ -331,6 +363,13 @@ void g3d_water_falls_set_threshold(float drop) {
 void g3d_water_falls_set_style(float foam, float mist) {
     F.foam = foam < 0.0f ? 0.0f : foam;
     F.mist = mist < 0.0f ? 0.0f : mist;
+}
+
+int g3d_water_falls_feet(float *out, int max) {
+    falls_build_if_needed();
+    int n = F.nfeet < max ? F.nfeet : max;
+    if (out) memcpy(out, F.feet, (size_t)n * 5 * sizeof(float));
+    return n;
 }
 
 int g3d_water_falls_count(void) { return F.sheets; }

@@ -19,6 +19,7 @@
 #include "libmod_3d_flow.h"
 #include <SDL.h>
 #include "libmod_3d_particles.h"
+#include "libmod_3d_water_splash.h"
 #include "libmod_3d_fire.h"
 #include "libmod_3d_sky.h"
 #include "libmod_3d_ibl.h"
@@ -1624,6 +1625,10 @@ void g3d_renderer_render(void) {
         wsim_last = now;
         if (dt > 0.1f) dt = 0.1f;
         g3d_watersim_step(dt);
+        /* Droplets at the foot of the falls and off anything solid standing in
+           moving water. Before the particle pass below, so they are drawn the
+           same frame they are born. */
+        g3d_water_splash_tick(dt);
         g3d_watersim_render(g_renderer.active_camera, g_renderer.flip_y);
     }
     /* 3D voxel water (fills caves, waterfalls): advance + draw */

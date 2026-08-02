@@ -125,6 +125,7 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_water_render.c
     libmod_3d_water_spectrum.c
     libmod_3d_water_falls.c
+    libmod_3d_water_splash.c
     libmod_3d_cave.c
     libmod_3d_voxterrain.c
 )
