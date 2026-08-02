@@ -160,6 +160,13 @@ int g3d_entity_impl_set_rotation(int entity_id, float pitch, float yaw, float ro
     return 1;
 }
 
+int g3d_entity_impl_set_collider(int entity_id, int solid) {
+    G3DEntity *e = g3d_entity_impl_get(entity_id);
+    if (!e) return 0;
+    e->collider = solid ? 1 : 0;
+    return 1;
+}
+
 int g3d_entity_impl_set_scale(int entity_id, float sx, float sy, float sz) {
     G3DEntity *entity = g3d_entity_impl_get(entity_id);
     if (!entity)

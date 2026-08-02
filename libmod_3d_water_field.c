@@ -45,6 +45,7 @@ static struct {
     float *fL, *fR, *fT, *fB;   /* outflow flux to each neighbour             */
     float *vx, *vz;   /* horizontal velocity, units/second                    */
     float *hold;      /* surface each cell must keep (placed water); NULL = none  */
+    unsigned char *obst;  /* 1 = solid: a rock stands here and water goes round it */
 
     WFSpring springs[WF_MAX_SPRINGS];
     int   nspring;
@@ -172,8 +173,8 @@ static void wf_rebuild_routing(void) {
 static void wf_free_arrays(void) {
     free(W.terr); free(W.route); free(W.d);
     free(W.fL); free(W.fR); free(W.fT); free(W.fB);
-    free(W.vx); free(W.vz); free(W.hold);
-    W.hold = NULL;
+    free(W.vx); free(W.vz); free(W.hold); free(W.obst);
+    W.hold = NULL; W.obst = NULL;
     W.terr = W.route = W.d = NULL;
     W.fL = W.fR = W.fT = W.fB = NULL;
     W.vx = W.vz = NULL;
@@ -256,11 +257,21 @@ unsigned int g3d_waterfield_revision(void)      { return W.revision; }
    Sources
    -------------------------------------------------------------------------- */
 
+static void wf_touch_bounds(int i, int j);
+
 int g3d_waterfield_add_spring_tagged(float x, float z, float rate, int tag) {
     if (!W.active || W.nspring >= WF_MAX_SPRINGS) return -1;
     WFSpring *s = &W.springs[W.nspring];
     s->cell = wf_cell_of(x, z);
     s->x = x; s->z = z; s->rate = rate; s->tag = tag;
+
+    /* El rectangulo mojado tiene que cubrir el manantial DESDE YA. La simulacion
+       solo recorre ese rectangulo, asi que un manantial fuera de el vierte en
+       una celda que nunca se visita: el agua se apila en el sitio y no baja.
+       Pasaba solo desde un juego, donde el mar se asienta antes de crear los
+       manantiales y deja el rectangulo pegado a la costa, con la cabecera del
+       rio fuera. */
+    wf_touch_bounds(s->cell % W.side, s->cell / W.side);
     return W.nspring++;
 }
 
@@ -553,6 +564,8 @@ static float wf_substep(float h) {
             int c = j * S + i;
             float dc = W.d[c];
             if (dc <= 0.0f) { W.fL[c] = W.fR[c] = W.fT[c] = W.fB[c] = 0.0f; continue; }
+            /* Nothing flows out of solid rock. */
+            if (W.obst && W.obst[c]) { W.fL[c] = W.fR[c] = W.fT[c] = W.fB[c] = 0.0f; continue; }
 
             float hc = W.route[c] + dc;
             float sL = (i > 0)     ? (W.route[c - 1] + W.d[c - 1]) : W.route[c];
@@ -565,6 +578,17 @@ static float wf_substep(float h) {
             float nR = (W.fR[c] + acc * (hc - sR)) * damp; if (nR < 0.0f) nR = 0.0f;
             float nT = (W.fT[c] + acc * (hc - sT)) * damp; if (nT < 0.0f) nT = 0.0f;
             float nB = (W.fB[c] + acc * (hc - sB)) * damp; if (nB < 0.0f) nB = 0.0f;
+
+            /* ...and nothing flows INTO it either. Closing these four pipes is
+               the whole trick: the water arriving at a rock has nowhere forward
+               to go, so it piles up on the upstream face and leaves sideways --
+               which is what going round something actually is. */
+            if (W.obst) {
+                if (i > 0     && W.obst[c - 1]) nL = 0.0f;
+                if (i < S - 1 && W.obst[c + 1]) nR = 0.0f;
+                if (j > 0     && W.obst[c - S]) nT = 0.0f;
+                if (j < S - 1 && W.obst[c + S]) nB = 0.0f;
+            }
 
             /* A cell may never push out more water than it holds -- and where an
                author placed water, it may only give away the EXCESS above that.
@@ -674,6 +698,82 @@ static float wf_stable_step(float maxd) {
     return dt;
 }
 
+/* Solid things standing in the water. Replaces the WHOLE set every call rather
+   than adding to it: the caller rescans the scene periodically, and an additive
+   API would pile duplicate rocks up forever -- the same bug the springs had.
+
+   Boxes are { min_x, min_z, max_x, max_z }. The revision only moves when the
+   mask actually CHANGED, so a rock that has not moved does not force everything
+   keyed on the field (waterfall geometry, GPU uploads) to rebuild 30 times a
+   second. */
+int g3d_waterfield_set_obstacles(const float *boxes, int n) {
+    if (!W.active) return 0;
+    int S = W.side, N = S * S;
+    float cell = W.world_size / (float)(S - 1);
+    float ox = -W.world_size * 0.5f, oz = -W.world_size * 0.5f;
+
+    if (n <= 0 || !boxes) {
+        if (!W.obst) return 0;
+        free(W.obst); W.obst = NULL;
+        W.revision = ++g_wf_revision_seq;
+        return 0;
+    }
+
+    unsigned char *mask = (unsigned char *)calloc((size_t)N, 1);
+    if (!mask) return 0;
+
+    int blocked = 0;
+    for (int b = 0; b < n; b++) {
+        const float *r = &boxes[b * 4];
+        int i0 = (int)floorf((r[0] - ox) / cell);
+        int i1 = (int)ceilf ((r[2] - ox) / cell);
+        int j0 = (int)floorf((r[1] - oz) / cell);
+        int j1 = (int)ceilf ((r[3] - oz) / cell);
+        if (i0 < 0) i0 = 0; if (j0 < 0) j0 = 0;
+        if (i1 > S - 1) i1 = S - 1; if (j1 > S - 1) j1 = S - 1;
+        for (int j = j0; j <= j1; j++)
+            for (int i = i0; i <= i1; i++)
+                if (!mask[j * S + i]) { mask[j * S + i] = 1; blocked++; }
+    }
+
+    if (W.obst && memcmp(W.obst, mask, (size_t)N) == 0) { free(mask); return blocked; }
+
+    /* Water caught under a rock that just appeared is DISPLACED, not deleted:
+       it goes to whichever neighbours are still free. Dropping it instead would
+       make a river lose volume every time something was placed in it. */
+    if (W.d) {
+        for (int j = 0; j < S; j++)
+            for (int i = 0; i < S; i++) {
+                int c = j * S + i;
+                if (!mask[c] || W.d[c] <= 0.0f) continue;
+                int nb[4], nn = 0;
+                if (i > 0     && !mask[c - 1]) nb[nn++] = c - 1;
+                if (i < S - 1 && !mask[c + 1]) nb[nn++] = c + 1;
+                if (j > 0     && !mask[c - S]) nb[nn++] = c - S;
+                if (j < S - 1 && !mask[c + S]) nb[nn++] = c + S;
+                if (!nn) continue;
+                float share = W.d[c] / (float)nn;
+                for (int k = 0; k < nn; k++) W.d[nb[k]] += share;
+                W.d[c] = 0.0f;
+            }
+    }
+
+    free(W.obst);
+    W.obst = mask;
+    W.revision = ++g_wf_revision_seq;
+    return blocked;
+}
+
+int g3d_waterfield_obstacle_at(float x, float z) {
+    if (!W.active || !W.obst) return 0;
+    int S = W.side;
+    float cell = W.world_size / (float)(S - 1);
+    int i = (int)((x + W.world_size * 0.5f) / cell + 0.5f);
+    int j = (int)((z + W.world_size * 0.5f) / cell + 0.5f);
+    if (i < 0 || j < 0 || i >= S || j >= S) return 0;
+    return W.obst[j * S + i] ? 1 : 0;
+}
+
 void g3d_waterfield_step(float dt) {
     if (!W.active || dt <= 0.0f) return;
     if (dt > 0.25f) dt = 0.25f;          /* ignore hitches / breakpoints */
@@ -701,7 +801,18 @@ void g3d_waterfield_step(float dt) {
 
 void g3d_waterfield_settle(float seconds) {
     if (!W.active || seconds <= 0.0f) return;
+
+    /* El paso estable se calcula con el agua MAS HONDA que ya hay. Arrancar de
+       cero daba por bueno el paso mas grande posible en la primera iteracion,
+       que sobre un campo ya lleno viola el CFL de largo: la primera pasada sale
+       inestable y el paso se desploma para el resto, de modo que un manantial
+       recien puesto inyecta pero su agua no llega a moverse -- se queda una
+       columna clavada en su celda.
+       Solo se notaba desde un juego, porque ahi el mar se asienta ANTES de
+       crear los manantiales; en el editor el orden es el contrario. */
     float t = 0.0f, maxd = 0.0f;
+    for (int i = 0, n = W.side * W.side; i < n; i++)
+        if (W.d[i] > maxd) maxd = W.d[i];
     int guard = 0;
     while (t < seconds && guard < 8000) {
         float h = wf_stable_step(maxd);

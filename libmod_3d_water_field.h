@@ -163,6 +163,20 @@ float g3d_waterfield_level_at(float x, float z);
 /* Depth of water at (x,z); 0 where dry. */
 float g3d_waterfield_depth_at(float x, float z);
 
+/* Solid things standing in the water: water flows AROUND them instead of
+   through them. `boxes` is `n` entries of { min_x, min_z, max_x, max_z }, and
+   the call REPLACES the whole set -- pass n=0 to clear it. Returns how many
+   cells are blocked.
+
+   Replacing rather than adding is deliberate: the caller rescans the scene
+   periodically, so an additive API would stack duplicates forever. The field
+   revision only moves when the mask really changed, so a rock sitting still
+   costs nothing. */
+int g3d_waterfield_set_obstacles(const float *boxes, int n);
+
+/* Is (x,z) inside a registered obstacle? */
+int g3d_waterfield_obstacle_at(float x, float z);
+
 /* Horizontal flow velocity at (x,z) in units/second. Drives buoyant objects
    downstream, particle spawn direction and the shader's flow-map scroll. */
 void  g3d_waterfield_flow_at(float x, float z, float *vx, float *vz);

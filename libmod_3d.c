@@ -15,6 +15,8 @@
 #include "libmod_3d_zone.h"
 #include "libmod_3d_water.h"
 #include "libmod_3d_water_render.h"
+#include "libmod_3d_water_splash.h"
+#include "libmod_3d_watersim.h"
 #include "libmod_3d_fire.h"
 #include "libmod_3d_obj.h"
 #include "libmod_3d_fbx.h"
@@ -1420,6 +1422,31 @@ int64_t g3d_water_set_surf_bgd(INSTANCE *my, int64_t *params) {
 }
 int64_t g3d_water_set_surf_wave_bgd(INSTANCE *my, int64_t *params) {
     g3d_water_render_set_surf_wave(*(float *)&params[0], *(float *)&params[1]);
+    return 1;
+}
+/* Espuma y salpicaduras. Existian los ajustes pero no habia por donde tocarlos:
+   el deslizador de espuma del editor iba al sistema viejo de flujo, no al agua
+   nueva, asi que el unico valor posible era el que trae por defecto. */
+int64_t g3d_water_set_foam_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_render_set_detail(*(float *)&params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_water_set_splash_bgd(INSTANCE *my, int64_t *params) {
+    g3d_water_splash_set_amount(*(float *)&params[0]);
+    g3d_water_splash_set_threshold(*(float *)&params[1]);
+    return 1;
+}
+/* La simulacion del agua tenia ajustes que NINGUN script podia tocar: existian
+   en C pero no estaban exportados. El editor los usaba (asienta 60 s al colocar
+   agua, y pone la evaporacion a 0) y el juego no, asi que lo que se componia no
+   era lo que luego se jugaba -- un rio alimentado por un manantial salia seco
+   porque en el juego empezaba de cero y tardaba minutos en bajar. */
+int64_t g3d_watersim_settle_bgd(INSTANCE *my, int64_t *params) {
+    g3d_watersim_settle(*(float *)&params[0]);
+    return 1;
+}
+int64_t g3d_watersim_set_evaporation_bgd(INSTANCE *my, int64_t *params) {
+    g3d_watersim_set_evaporation(*(float *)&params[0]);
     return 1;
 }
 int64_t g3d_water_set_caustics_bgd(INSTANCE *my, int64_t *params) {

@@ -136,7 +136,14 @@ static void spl_falls(float dt) {
 static void spl_obstacles(float dt) {
     int count = 0;
     int *ents = g3d_scene_impl_get_entities(&count);
-    if (!ents || count <= 0) return;
+    if (!ents || count <= 0) { g3d_waterfield_set_obstacles(NULL, 0); return; }
+
+    /* Collected while walking the scene and handed to the field in one go, so
+       the water actually goes ROUND the rocks instead of through them. The
+       splash and the diversion then agree by construction: both come from the
+       same list of things standing in the water. */
+    static float boxes[SPL_MAX_TRACKED * 4];
+    int nboxes = 0;
 
     for (int i = 0; i < count; i++) {
         float mn[3], mx[3];
@@ -157,10 +164,24 @@ static void spl_obstacles(float dt) {
            It has to break the surface. */
         if (mx[1] < surface + 0.05f) continue;
 
+        /* It breaks the surface, so it is also in the way. The box is pulled in
+           to a CORE rather than used whole: a bounding box always overstates a
+           rounded rock, and on something like a tree it would dam the river
+           across the full width of the canopy when only the trunk is in it. */
+        if (nboxes < SPL_MAX_TRACKED) {
+            const float core = 0.7f;
+            float *bx = &boxes[nboxes * 4];
+            bx[0] = cx - rx * core; bx[1] = cz - rz * core;
+            bx[2] = cx + rx * core; bx[3] = cz + rz * core;
+            nboxes++;
+        }
+
         float vx = 0.0f, vz = 0.0f;
         g3d_waterfield_flow_at(cx, cz, &vx, &vz);
         float speed = sqrtf(vx*vx + vz*vz);
         if (speed < SP.threshold) continue;           /* still water, no splash */
+
+        if (SP.amount <= 0.0f) continue;      /* still blocks, just does not spray */
 
         float *budget = spl_budget_for(ents[i]);
         if (!budget) continue;
@@ -189,19 +210,22 @@ static void spl_obstacles(float dt) {
                             0.95f, 0.97f, 1.0f);
         SP.emitted++;
     }
+
+    g3d_waterfield_set_obstacles(nboxes ? boxes : NULL, nboxes);
 }
 
 /* --------------------------------------------------------------------------- */
 
 void g3d_water_splash_tick(float dt) {
-    if (SP.amount <= 0.0f) return;
     if (!g3d_waterfield_active()) return;
     if (dt <= 0.0f) return;
     if (dt > 0.1f) dt = 0.1f;      /* a stall must not dump a cloud at once */
 
-    spl_falls(dt);
+    if (SP.amount > 0.0f) spl_falls(dt);
 
-    /* Every collider in the scene gets its world AABB rebuilt to test it, so
+    /* Turning the droplets off must NOT put the rocks back to being invisible
+       to the water: the diversion is simulation, the spray is decoration.
+       Every collider in the scene gets its world AABB rebuilt to test it, so
        the scan is throttled rather than run per frame -- at 144 fps that is
        most of the cost for none of the effect. The accumulated dt goes in
        whole, so the droplet rate is unchanged. */
