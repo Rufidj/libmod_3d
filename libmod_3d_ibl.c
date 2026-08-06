@@ -60,6 +60,9 @@ void g3d_ibl_set_intensity(float intensity) {
 }
 float g3d_ibl_intensity(void) { return g_ibl.intensity; }
 
+/* Cada cuanto, como mucho, se rehace el mapa de entorno (ms). */
+#define G3D_IBL_MIN_INTERVAL_MS 150
+
 void g3d_ibl_invalidate(void) { g_ibl.dirty = 1; }
 
 float g3d_ibl_prefilter_mips(void) { return (float)PREF_MIPS; }
@@ -357,6 +360,22 @@ void g3d_ibl_update(void) {
         return;
     if (!ibl_init())
         return;
+
+    /* RITMO MAXIMO. Recapturar el entorno son seis caras de cubemap mas dos
+       convoluciones: del orden de 20 ms. Un ciclo dia/noche cambia el cielo en
+       CADA frame, y hacerlo entero cada vez hundia el juego de 2600 a 47 fps
+       (medido). La luz ambiental de un amanecer cambia despacio, asi que basta
+       con rehacerla unas veces por segundo: el ojo no distingue la diferencia y
+       el coste deja de existir.
+       Un cambio brusco -- entrar en una cueva, cambiar de escena -- se ve igual
+       de rapido porque el retraso maximo es una fraccion de segundo. */
+    {
+        static unsigned int last_ms = 0;
+        unsigned int now = SDL_GetTicks();
+        if (last_ms != 0 && (now - last_ms) < G3D_IBL_MIN_INTERVAL_MS)
+            return;              /* sigue sucio: se rehara en cuanto toque */
+        last_ms = now;
+    }
 
     GLint prev_fbo = 0, prev_vp[4];
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prev_fbo);

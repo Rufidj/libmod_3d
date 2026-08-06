@@ -548,7 +548,19 @@ static float wf_substep(float h) {
                        is untouched, so springs and rain still make their own
                        lakes up there. */
                     float need = W.sea - W.terr[c];
-                    if (need > 0.0f) dep = need;
+                    if (need > 0.0f) {
+                        /* ...pero el agua COLOCADA manda sobre el mar. Un lago
+                           puesto a mano sobre una cuenca cuyo fondo queda bajo el
+                           nivel del mar es una decision del autor, no un charco
+                           que el mar deba nivelar. Sin esto, en el editor (sin
+                           mar) el lago se veia y en el juego (que si crea mar)
+                           desaparecia: el pin lo bajaba al nivel del mar en el
+                           primer asentado. */
+                        float keep = 0.0f;
+                        if (W.hold && W.hold[c] > G3D_NO_WATER_TEST)
+                            keep = W.hold[c] - W.terr[c];
+                        dep = (need > keep) ? need : keep;
+                    }
                 }
                 W.d[c] = dep;
             }

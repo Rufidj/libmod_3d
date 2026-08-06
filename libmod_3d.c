@@ -16,6 +16,7 @@
 #include "libmod_3d_water.h"
 #include "libmod_3d_water_render.h"
 #include "libmod_3d_water_splash.h"
+#include "libmod_3d_scatter.h"
 #include "libmod_3d_watersim.h"
 #include "libmod_3d_fire.h"
 #include "libmod_3d_obj.h"
@@ -84,6 +85,9 @@ enum {
     LOC3D_INTENSITY,
     LOC3D_RANGE,
     LOC3D_CONE_ANGLE,
+    LOC3D_WIND,
+    LOC3D_DRAW_DIST,
+    LOC3D_SOLID,
     LOC3D_ALPHA,
     LOC3D_COLORR,
     LOC3D_COLORG,
@@ -117,6 +121,9 @@ DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
     { "intensity" , NULL, -1, -1 },
     { "range"     , NULL, -1, -1 },
     { "cone_angle", NULL, -1, -1 },
+    { "wind"      , NULL, -1, -1 },
+    { "draw_dist" , NULL, -1, -1 },
+    { "solid"     , NULL, -1, -1 },
     /* BennuGD's per-graphic locals (declared by libbggfx) - resolved by NAME to
        the SAME process storage, so g3d entities can obey the standard alpha /
        color / blend locals with the normal LOCBYTE/LOCINT64 macros. */
@@ -1441,6 +1448,21 @@ int64_t g3d_water_set_splash_bgd(INSTANCE *my, int64_t *params) {
    agua, y pone la evaporacion a 0) y el juego no, asi que lo que se componia no
    era lo que luego se jugaba -- un rio alimentado por un manantial salia seco
    porque en el juego empezaba de cero y tardaba minutos en bajar. */
+/* Vegetacion sembrada. Una linea carga el fichero entero y monta los grupos de
+   instancias: emitir miles de llamadas de colocacion en el codigo generado
+   haria un main.prg inmanejable. */
+int64_t g3d_scatter_group_bgd(INSTANCE *my, int64_t *params) {
+    const char *a = string_get(params[0]);
+    int k = a ? g3d_scatter_group(a) : -1;
+    string_discard(params[0]);
+    return k;
+}
+int64_t g3d_scatter_load_bgd(INSTANCE *my, int64_t *params) {
+    const char *path = string_get(params[0]);
+    int n = path ? g3d_scatter_load(path, *(float *)&params[1]) : 0;
+    string_discard(params[0]);
+    return n;
+}
 int64_t g3d_watersim_settle_bgd(INSTANCE *my, int64_t *params) {
     g3d_watersim_settle(*(float *)&params[0]);
     return 1;
@@ -2496,6 +2518,14 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
                     (int) LOCINT64( libmod_3d, i, LOC3D_BLEND_EQ_ALPHA ) );
             break;
         }
+        case 4: { /* C3D_SCATTER: el proceso ES la especie sembrada entera */
+            g3d_scatter_kind_apply(entity_id,
+                                   (float) LOCDOUBLE( libmod_3d, i, LOC3D_WIND ),
+                                   (float) LOCDOUBLE( libmod_3d, i, LOC3D_DRAW_DIST ),
+                                   (int)   LOCINT64(  libmod_3d, i, LOC3D_SOLID ));
+            break;
+        }
+
         case 2: { /* C3D_LIGHT */
             g3d_light_impl_set_position( entity_id, px, py, pz );
 

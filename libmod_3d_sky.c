@@ -214,7 +214,25 @@ int  g3d_sky_low_clouds(float *cover, float *base, float *thick, float *speed) {
     if (thick) *thick = g_sky.low_thick; if (speed) *speed = g_sky.low_speed;
     return g_sky.low_cover > 0.0f;
 }
+/* El sol que ilumina el mundo es UNO. El agua, las cascadas y las nubes piden
+   el sol por aqui, y esto devolvia el que guarda el cielo -- que solo cambia si
+   alguien llama a g3d_sky_set_sun. Un ciclo dia/noche mueve una LUZ, asi que el
+   agua se quedaba iluminada por un sol clavado a mediodia mientras el resto de
+   la escena anochecia.
+   Ahora manda la luz direccional de la escena si la hay, y el sol guardado en el
+   cielo queda como respaldo para escenas que no tienen ninguna. */
 void g3d_sky_get_sun(float dir[3], float col[3]) {
+    int lc = 0;
+    int *lids = g3d_scene_impl_get_lights(&lc);
+    for (int i = 0; i < lc; i++) {
+        G3DLight *l = g3d_light_impl_get(lids[i]);
+        if (!l || l->type != G3D_LIGHT_TYPE_DIRECTIONAL) continue;
+        if (dir) { dir[0] = -l->direction.x; dir[1] = -l->direction.y; dir[2] = -l->direction.z; }
+        if (col) { col[0] = l->color[0] * l->intensity;
+                   col[1] = l->color[1] * l->intensity;
+                   col[2] = l->color[2] * l->intensity; }
+        return;
+    }
     if (dir) { dir[0]=g_sky.sun_dir[0]; dir[1]=g_sky.sun_dir[1]; dir[2]=g_sky.sun_dir[2]; }
     if (col) { col[0]=g_sky.sun_col[0]; col[1]=g_sky.sun_col[1]; col[2]=g_sky.sun_col[2]; }
 }

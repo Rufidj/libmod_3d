@@ -3,6 +3,7 @@
  */
 
 #include "libmod_3d_instance.h"
+#include "libmod_3d_sky.h"
 #include "libmod_3d_shader.h"
 #include "libmod_3d_mesh.h"
 #include "libmod_3d_texture.h"
@@ -416,6 +417,14 @@ int g3d_instances_add(int group, float x, float y, float z,
         gr->cap *= 2;
         gr->mats = (float *)realloc(gr->mats, (size_t)gr->cap * 16 * sizeof(float));
         gr->visible = (float *)realloc(gr->visible, (size_t)gr->cap * 16 * sizeof(float));
+        /* El buffer del LOD crece con los otros dos. Se quedaba en la capacidad
+           inicial (256) mientras el grupo seguia creciendo, y al dibujar se
+           escribia fuera: con mas de 256 copias y el LOD encendido, el juego se
+           cerraba. Estuvo latente porque el LOD venia apagado de fabrica y nada
+           lo encendia. */
+        if (gr->lod_visible)
+            gr->lod_visible = (float *)realloc(gr->lod_visible,
+                                               (size_t)gr->cap * 16 * sizeof(float));
     }
     Mat4 m = mat4_trs(vec3_make(x, y, z),
                       quat_from_euler(0.0f, yaw_deg * 3.14159265f / 180.0f, 0.0f),
@@ -599,7 +608,14 @@ void g3d_instances_render_all(G3DCamera *camera, int flip_y) {
         g3d_shader_set_float(sp, "uTime", now);
         g3d_shader_set_vec3(sp, "uLightDir", ldir);
         g3d_shader_set_vec3(sp, "uLightColor", lcol);
-        g3d_shader_set_vec3(sp, "uAmbient", vec3_make(0.40f, 0.42f, 0.45f));
+        /* La ambiental sale del CIELO, no de un valor fijo. Estaba clavada en
+           0.40, asi que la vegetacion conservaba el 40% de su color pasara lo
+           que pasara: de noche seguia igual de clara y parecia que el sol no le
+           afectaba. Como el cielo lo mueve el propio ciclo dia/noche, con esto
+           la vegetacion se oscurece con el resto de la escena. */
+        float amb[3] = { 0.40f, 0.42f, 0.45f };
+        g3d_sky_get_ambient(amb);
+        g3d_shader_set_vec3(sp, "uAmbient", vec3_make(amb[0], amb[1], amb[2]));
         if (shadows) {
             g3d_shader_set_int(sp, "uShadowMap", 1);
             g3d_shader_set_mat4(sp, "uLightSpace", lspace);
