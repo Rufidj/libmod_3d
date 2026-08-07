@@ -88,6 +88,12 @@ enum {
     LOC3D_WIND,
     LOC3D_DRAW_DIST,
     LOC3D_SOLID,
+    LOC3D_W_WAVES,
+    LOC3D_W_LEN,
+    LOC3D_W_SPEED,
+    LOC3D_W_FOAM,
+    LOC3D_W_SURF,
+    LOC3D_W_SPLASH,
     LOC3D_ALPHA,
     LOC3D_COLORR,
     LOC3D_COLORG,
@@ -124,6 +130,12 @@ DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
     { "wind"      , NULL, -1, -1 },
     { "draw_dist" , NULL, -1, -1 },
     { "solid"     , NULL, -1, -1 },
+    { "water.waves"      , NULL, -1, -1 },
+    { "water.wave_len"   , NULL, -1, -1 },
+    { "water.wave_speed" , NULL, -1, -1 },
+    { "water.foam"       , NULL, -1, -1 },
+    { "water.surf"       , NULL, -1, -1 },
+    { "water.splash"     , NULL, -1, -1 },
     /* BennuGD's per-graphic locals (declared by libbggfx) - resolved by NAME to
        the SAME process storage, so g3d entities can obey the standard alpha /
        color / blend locals with the normal LOCBYTE/LOCINT64 macros. */
@@ -1451,6 +1463,18 @@ int64_t g3d_water_set_splash_bgd(INSTANCE *my, int64_t *params) {
 /* Vegetacion sembrada. Una linea carga el fichero entero y monta los grupos de
    instancias: emitir miles de llamadas de colocacion en el codigo generado
    haria un main.prg inmanejable. */
+/* Contadores del renderer. Existian en C pero ningun script podia leerlos, asi
+   que para saber por que un juego va lento habia que mirar la consola del
+   editor -- y el motor los imprimia en CADA frame, que ademas cuesta. */
+int64_t g3d_draw_calls_bgd(INSTANCE *my, int64_t *params) {
+    return (int64_t)g3d_renderer_get_draw_calls();
+}
+int64_t g3d_triangles_bgd(INSTANCE *my, int64_t *params) {
+    return (int64_t)g3d_renderer_get_triangle_count();
+}
+int64_t g3d_culled_bgd(INSTANCE *my, int64_t *params) {
+    return (int64_t)g3d_renderer_get_culled_entities();
+}
 int64_t g3d_scatter_group_bgd(INSTANCE *my, int64_t *params) {
     const char *a = string_get(params[0]);
     int k = a ? g3d_scatter_group(a) : -1;
@@ -1462,6 +1486,16 @@ int64_t g3d_scatter_load_bgd(INSTANCE *my, int64_t *params) {
     int n = path ? g3d_scatter_load(path, *(float *)&params[1]) : 0;
     string_discard(params[0]);
     return n;
+}
+/* Manantiales. Existian en el editor pero NO se emitian al juego: un rio nacido
+   de un manantial se veia al componer y desaparecia al jugar. */
+int64_t g3d_watersim_add_source_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_watersim_add_source(*(float *)&params[0], *(float *)&params[1],
+                                   *(float *)&params[2]);
+}
+int64_t g3d_watersim_set_viscosity_bgd(INSTANCE *my, int64_t *params) {
+    g3d_waterfield_set_viscosity(*(float *)&params[0]);
+    return 1;
 }
 int64_t g3d_watersim_settle_bgd(INSTANCE *my, int64_t *params) {
     g3d_watersim_settle(*(float *)&params[0]);
@@ -2123,6 +2157,18 @@ int64_t g3d_particles_clear_bgd(INSTANCE *my, int64_t *params) {
 }
 
 /* Lighting wrappers */
+/* g3d_light_create(tipo) -- sin color.
+   El color de una luz llevada por un PROCESS sale de color_r/g/b, que el hook
+   vuelca cada frame: los tres flotantes de la version larga los pisaba el
+   propio hook en el primer frame, asi que eran ruido en el codigo generado.
+   La firma de cuatro sigue existiendo para quien la use. */
+int64_t g3d_light_create_type_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
+    /* Blanco de partida: si el proceso no toca color_r/g/b, BennuGD ya los deja
+       en 255 y el hook envia blanco de todos modos. */
+    return g3d_light_impl_create((int)params[0], 1.0f, 1.0f, 1.0f);
+}
+
 int64_t g3d_light_create_bgd(INSTANCE *my, int64_t *params) {
     g3d_ensure_init();
     int type = (int)params[0];
@@ -2518,6 +2564,22 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
                     (int) LOCINT64( libmod_3d, i, LOC3D_BLEND_EQ_ALPHA ) );
             break;
         }
+        case 5: { /* C3D_WATER: el proceso ES el agua del mundo */
+            /* Todos estos ajustes son escrituras baratas -- guardan un valor que
+               el shader lee. Si alguno pasara a disparar trabajo pesado habria
+               que comparar antes: un local que reconstruye algo en cada frame es
+               una trampa de rendimiento (lo aprendimos con el cielo). */
+            g3d_water_render_set_waves((float) LOCDOUBLE( libmod_3d, i, LOC3D_W_WAVES ),
+                                       (float) LOCDOUBLE( libmod_3d, i, LOC3D_W_LEN ),
+                                       (float) LOCDOUBLE( libmod_3d, i, LOC3D_W_SPEED ),
+                                       1.0f);
+            g3d_water_render_set_detail((float) LOCDOUBLE( libmod_3d, i, LOC3D_W_FOAM ), 1.0f);
+            g3d_water_render_set_surf_wave((float) LOCDOUBLE( libmod_3d, i, LOC3D_W_SURF ),
+                                           (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_X ));
+            g3d_water_splash_set_amount((float) LOCDOUBLE( libmod_3d, i, LOC3D_W_SPLASH ));
+            break;
+        }
+
         case 4: { /* C3D_SCATTER: el proceso ES la especie sembrada entera */
             g3d_scatter_kind_apply(entity_id,
                                    (float) LOCDOUBLE( libmod_3d, i, LOC3D_WIND ),

@@ -31,6 +31,9 @@ DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
     /* Una ESPECIE sembrada (vegetacion instanciada). El proceso no es un arbol:
        es el bosque entero de esa especie, que se dibuja de una vez. */
     {"C3D_SCATTER",             TYPE_QWORD, 4},
+    /* El agua entera del mundo: mar, lagos y rios son UN campo, asi que el
+       proceso no es "un lago" sino el agua. */
+    {"C3D_WATER",               TYPE_QWORD, 5},
 
     {NULL, 0, 0}
 };
@@ -59,6 +62,17 @@ char * __bgdexport(libmod_3d, locals_def) =
     "DOUBLE wind=0.0;\n"
     "DOUBLE draw_dist=0.0;\n"
     "INT solid=0;\n"
+    /* Agua (C3D_WATER). En estructura para no sembrar de nombres sueltos el
+       espacio de locales de TODOS los procesos -- 'foam' o 'speed' a secas
+       chocarian con cualquier cosa. */
+    "STRUCT water\n"
+    "   DOUBLE waves = 0.22;\n"
+    "   DOUBLE wave_len = 9.0;\n"
+    "   DOUBLE wave_speed = 1.1;\n"
+    "   DOUBLE foam = 0.55;\n"
+    "   DOUBLE surf = 0.9;\n"
+    "   DOUBLE splash = 1.4;\n"
+    "END\n"
     ;
 
 #endif
@@ -139,6 +153,7 @@ int64_t g3d_model_spawn_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_md3_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_texture_load_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_light_create_type_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_set_position_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_set_direction_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_set_intensity_bgd(INSTANCE *my, int64_t *params);
@@ -192,8 +207,13 @@ int64_t g3d_water_set_surf_wave_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_foam_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_splash_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_watersim_settle_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_watersim_add_source_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_watersim_set_viscosity_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_scatter_load_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_scatter_group_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_draw_calls_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_triangles_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_culled_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_watersim_set_evaporation_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_caustics_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_water_set_underwater_look_bgd(INSTANCE *my, int64_t *params);
@@ -457,6 +477,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_LOAD_MD3", "S", TYPE_INT, g3d_model_load_md3_bgd),
     FUNC("G3D_LOAD_TEXTURE", "S", TYPE_INT, g3d_texture_load_bgd),
     FUNC("G3D_LIGHT_CREATE", "IFFF", TYPE_INT, g3d_light_create_bgd),
+    /* Sobrecarga sin color: lo pone color_r/g/b via el hook. */
+    FUNC("G3D_LIGHT_CREATE", "I", TYPE_INT, g3d_light_create_type_bgd),
     FUNC("G3D_LIGHT_SET_POSITION", "IFFF", TYPE_INT, g3d_light_set_position_bgd),
     FUNC("G3D_LIGHT_SET_DIRECTION", "IFFF", TYPE_INT, g3d_light_set_direction_bgd),
     FUNC("G3D_LIGHT_SET_INTENSITY", "IF", TYPE_INT, g3d_light_set_intensity_bgd),
@@ -568,8 +590,13 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_WATER_SET_FOAM", "FF", TYPE_INT, g3d_water_set_foam_bgd),
     FUNC("G3D_WATER_SET_SPLASH", "FF", TYPE_INT, g3d_water_set_splash_bgd),
     FUNC("G3D_WATERSIM_SETTLE", "F", TYPE_INT, g3d_watersim_settle_bgd),
+    FUNC("G3D_WATERSIM_ADD_SOURCE", "FFF", TYPE_INT, g3d_watersim_add_source_bgd),
+    FUNC("G3D_WATERSIM_SET_VISCOSITY", "F", TYPE_INT, g3d_watersim_set_viscosity_bgd),
     FUNC("G3D_SCATTER_LOAD", "SF", TYPE_INT, g3d_scatter_load_bgd),
     FUNC("G3D_SCATTER_GROUP", "S", TYPE_INT, g3d_scatter_group_bgd),
+    FUNC("G3D_DRAW_CALLS", "", TYPE_INT, g3d_draw_calls_bgd),
+    FUNC("G3D_TRIANGLES", "", TYPE_INT, g3d_triangles_bgd),
+    FUNC("G3D_CULLED", "", TYPE_INT, g3d_culled_bgd),
     FUNC("G3D_WATERSIM_SET_EVAPORATION", "F", TYPE_INT, g3d_watersim_set_evaporation_bgd),
     FUNC("G3D_WATER_SET_CAUSTICS", "F", TYPE_INT, g3d_water_set_caustics_bgd),
     FUNC("G3D_WATER_SET_UNDERWATER_LOOK", "FF", TYPE_INT, g3d_water_set_underwater_look_bgd),

@@ -13,6 +13,7 @@
  */
 
 #include "libmod_3d_watersim.h"
+#include "libmod_3d_water.h"
 #include "libmod_3d_water_field.h"
 #include "libmod_3d_water_render.h"
 
@@ -32,6 +33,11 @@ void g3d_watersim_shutdown(void) {
 int g3d_watersim_active(void) { return g3d_waterfield_active(); }
 
 int g3d_watersim_add_source(float x, float z, float rate) {
+    /* Un manantial es motivo suficiente para que exista el campo. Antes hacia
+       falta que ANTES hubiera un mar o un lago que lo creara: en el editor eso
+       pasaba siempre, y en un juego con solo manantiales la llamada fallaba en
+       silencio y el rio no aparecia nunca. */
+    if (!g3d_waterfield_active() && !g3d_water_ensure_field()) return -1;
     return g3d_waterfield_add_spring(x, z, rate);
 }
 

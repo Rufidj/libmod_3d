@@ -43,6 +43,11 @@ void g3d_instances_set_alpha_cut(int group, int enabled);
 void g3d_instances_set_lod_distance(float d);
 float g3d_instances_get_lod_distance(void);   /* 0 = off */
 void g3d_instances_set_distance(int group, float dist);
+
+/* Reutiliza el recorte de `src` en vez de calcular el propio. Solo vale cuando
+   los dos grupos tienen las MISMAS transformaciones -- el caso de las piezas de
+   un modelo instanciado, que estan todas en el mismo sitio. */
+void g3d_instances_share_cull(int group, int src);
 void g3d_instances_clear(int group);
 int g3d_instances_count(int group);
 

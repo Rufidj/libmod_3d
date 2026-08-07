@@ -1562,10 +1562,15 @@ void g3d_renderer_end_frame(void) {
         return;
 
 #ifndef VITA
-    /* Stats */
-    printf("G3D: Draw calls: %u, Triangles: %u, Culled: %u\n",
-           g_renderer.draw_calls, g_renderer.triangles_rendered,
-           g_renderer.entities_culled);
+    /* Stats: un printf POR FRAME cuesta y ademas ahoga el log del editor.
+       Los contadores se leen ahora desde el script (g3d_draw_calls etc.), que es
+       donde sirven de algo. Se puede recuperar la traza con G3D_DEBUG_STATS=1. */
+    { static int trazar = -1;
+      if (trazar < 0) trazar = getenv("G3D_DEBUG_STATS") ? 1 : 0;
+      if (trazar)
+          printf("G3D: Draw calls: %u, Triangles: %u, Culled: %u\n",
+                 g_renderer.draw_calls, g_renderer.triangles_rendered,
+                 g_renderer.entities_culled); }
 
     /* Disable depth testing */
     glDisable(GL_DEPTH_TEST);
@@ -2016,6 +2021,14 @@ void g3d_renderer_set_directional_light(Vec3 direction, Vec3 color,
    STATISTICS
    ============================================================================
  */
+
+/* Sumar al contador desde otros subsistemas. El instanciado dibujaba miles de
+   copias sin aparecer en las estadisticas: el contador decia "1 dibujo" en un
+   bosque de 3585 palmeras, que es peor que no tener contador. */
+void g3d_renderer_add_stats(uint32_t calls, uint32_t triangles) {
+    g_renderer.draw_calls += calls;
+    g_renderer.triangles_rendered += triangles;
+}
 
 uint32_t g3d_renderer_get_draw_calls(void) {
     return g_renderer.draw_calls;

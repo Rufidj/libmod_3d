@@ -196,6 +196,23 @@ typedef struct {
     unsigned int lod_vao, lod_inst_vbo;
     int lod_gpu_cap;
     float *lod_visible;     /* far matrices this frame */
+    int vis_count, visf_count;   /* lo que sobrevivio al recorte este frame */
+    /* REJILLA ESPACIAL. Sin ella se recorren TODAS las instancias en cada
+       fotograma aunque no se vea ninguna: con 3585 palmeras de 31 piezas eran
+       111.000 iteraciones por frame, y otras tantas en la pasada de sombras.
+       Agrupadas en celdas, se descarta la celda entera de un test y el coste
+       pasa a depender de lo que se ve, que es como debe ser. */
+    int   *cells;        /* indices de instancia, ordenados por celda */
+    int   *cell_start;   /* cside*cside + 1 */
+    float *cell_y;       /* 2 por celda: y minima y maxima */
+    float  cmin[2], ccell;
+    int    cside;
+    int    grid_dirty;
+    /* Todas las piezas de un mismo modelo (tronco, hojas...) estan EN EL MISMO
+       SITIO, asi que recortarlas por separado es hacer 31 veces el mismo
+       trabajo. Con esto, las piezas 2..N reutilizan lo que calculo la primera.
+       -1 = este grupo se recorta a si mismo. */
+    int cull_src;
 } Group;
 
 static struct {
@@ -370,6 +387,9 @@ int g3d_instances_create(void *mesh, void *texture) {
     gr->count = 0;
     gr->wind = 0.0f;
     gr->max_dist = 250.0f;
+    gr->cull_src = -1;
+    gr->cells = NULL; gr->cell_start = NULL; gr->cell_y = NULL;
+    gr->cside = 0; gr->grid_dirty = 1;
     gr->alpha_cut = 1;      /* default: foliage-style alpha test */
     gr->gpu_cap = 0;
 #ifndef VITA
@@ -398,6 +418,9 @@ int g3d_instances_create_skinned(void *mesh, void *texture, void *model) {
     gr->mats = (float *)malloc((size_t)gr->cap * 16 * sizeof(float));
     gr->visible = (float *)malloc((size_t)gr->cap * 16 * sizeof(float));
     gr->max_dist = 250.0f;
+    gr->cull_src = -1;
+    gr->cells = NULL; gr->cell_start = NULL; gr->cell_y = NULL;
+    gr->cside = 0; gr->grid_dirty = 1;
     gr->alpha_cut = 1;      /* creatures with alpha textures still discard transparent bg */
     gr->skinned = 1;
     gr->skin_model = mo;
@@ -407,6 +430,60 @@ int g3d_instances_create_skinned(void *mesh, void *texture, void *model) {
 #endif
     gr->active = 1;
     return idx;
+}
+
+/* Reparte las instancias en celdas por su posicion en XZ. Conteo primero y
+   colocacion despues (ordenacion por conteo): una sola pasada de reserva en vez
+   de una lista por celda. */
+static void group_build_grid(Group *gr) {
+    free(gr->cells); free(gr->cell_start); free(gr->cell_y);
+    gr->cells = NULL; gr->cell_start = NULL; gr->cell_y = NULL; gr->cside = 0;
+    gr->grid_dirty = 0;
+    if (gr->count < 64) return;      /* con pocas, la rejilla cuesta mas que ahorra */
+
+    float mnx=1e30f, mnz=1e30f, mxx=-1e30f, mxz=-1e30f;
+    for (int n = 0; n < gr->count; n++) {
+        float *m = &gr->mats[n*16];
+        if (m[12]<mnx) mnx=m[12]; if (m[12]>mxx) mxx=m[12];
+        if (m[14]<mnz) mnz=m[14]; if (m[14]>mxz) mxz=m[14];
+    }
+    float w = mxx-mnx, d = mxz-mnz;
+    float ext = (w>d?w:d); if (ext < 1.0f) ext = 1.0f;
+    /* ~16 instancias por celda: bastante para que el descarte compense, no
+       tantas como para que la rejilla ocupe mas que los datos. */
+    int side = (int)sqrtf((float)gr->count / 16.0f);
+    if (side < 2) side = 2; if (side > 64) side = 64;
+
+    int nc = side*side;
+    gr->cell_start = (int*)calloc((size_t)nc+1, sizeof(int));
+    gr->cells      = (int*)malloc((size_t)gr->count * sizeof(int));
+    gr->cell_y     = (float*)malloc((size_t)nc * 2 * sizeof(float));
+    if (!gr->cell_start || !gr->cells || !gr->cell_y) {
+        free(gr->cells); free(gr->cell_start); free(gr->cell_y);
+        gr->cells=NULL; gr->cell_start=NULL; gr->cell_y=NULL; return;
+    }
+    gr->cside = side; gr->cmin[0]=mnx; gr->cmin[1]=mnz;
+    gr->ccell = ext / (float)side + 1e-4f;
+
+    for (int i = 0; i < nc; i++) { gr->cell_y[i*2]=1e30f; gr->cell_y[i*2+1]=-1e30f; }
+    #define CELL_OF(n) ({ float *mm=&gr->mats[(n)*16]; \
+        int ci=(int)((mm[12]-gr->cmin[0])/gr->ccell); \
+        int cj=(int)((mm[14]-gr->cmin[1])/gr->ccell); \
+        if(ci<0)ci=0; if(ci>=side)ci=side-1; \
+        if(cj<0)cj=0; if(cj>=side)cj=side-1; cj*side+ci; })
+    for (int n = 0; n < gr->count; n++) gr->cell_start[CELL_OF(n)+1]++;
+    for (int i = 0; i < nc; i++) gr->cell_start[i+1] += gr->cell_start[i];
+    int *fill = (int*)calloc((size_t)nc, sizeof(int));
+    if (!fill) return;
+    for (int n = 0; n < gr->count; n++) {
+        int c = CELL_OF(n);
+        gr->cells[gr->cell_start[c] + fill[c]++] = n;
+        float y = gr->mats[n*16+13];
+        if (y < gr->cell_y[c*2])   gr->cell_y[c*2]   = y;
+        if (y > gr->cell_y[c*2+1]) gr->cell_y[c*2+1] = y;
+    }
+    free(fill);
+    #undef CELL_OF
 }
 
 int g3d_instances_add(int group, float x, float y, float z,
@@ -433,6 +510,7 @@ int g3d_instances_add(int group, float x, float y, float z,
         gr->mats[gr->count * 16 + k] = m.m[k];
     gr->count++;
     gr->dirty = 1;
+    gr->grid_dirty = 1;
     return gr->count - 1;
 }
 
@@ -460,6 +538,15 @@ void g3d_instances_set_alpha_cut(int group, int enabled) {
     if (group >= 0 && group < MAX_GROUPS && g_inst.g[group].active)
         g_inst.g[group].alpha_cut = enabled ? 1 : 0;
 }
+/* Hace que `group` reutilice el recorte de `src` en vez de calcular el suyo.
+   Solo vale si los dos tienen exactamente las mismas transformaciones, que es
+   el caso de las piezas de un mismo modelo instanciado. */
+void g3d_instances_share_cull(int group, int src) {
+    if (group < 0 || group >= MAX_GROUPS || !g_inst.g[group].active) return;
+    if (src < 0 || src >= MAX_GROUPS || src == group) { g_inst.g[group].cull_src = -1; return; }
+    g_inst.g[group].cull_src = src;
+}
+
 void g3d_instances_set_distance(int group, float dist) {
     if (group >= 0 && group < MAX_GROUPS && g_inst.g[group].active)
         g_inst.g[group].max_dist = (dist > 1.0f) ? dist : 1.0f;
@@ -653,7 +740,52 @@ void g3d_instances_render_all(G3DCamera *camera, int flip_y) {
         int use_lod = (g_lod_dist > 0.0f && gr->lod_mesh && gr->lod_visible);
         float lod2 = g_lod_dist * g_lod_dist;
         int vis = 0, visf = 0;
-        for (int n = 0; n < gr->count; n++) {
+        /* Piezas hermanas: se copia el recorte ya hecho por la primera. */
+        /* Solo se comparte si esta pieza puede dibujar EXACTAMENTE lo mismo que
+           la maestra. Una pieza diminuta no genera malla de bajo poligono, y
+           heredar su recuento de lejanos la mandaba a dibujar con un buffer que
+           no existe -- el juego se cerraba. */
+        if (gr->cull_src >= 0 && g_inst.g[gr->cull_src].active &&
+            g_inst.g[gr->cull_src].count == gr->count &&
+            gr->cap >= g_inst.g[gr->cull_src].cap &&
+            (!g_inst.g[gr->cull_src].visf_count ||
+             (gr->lod_mesh && gr->lod_visible && gr->lod_vao))) {
+            Group *ms = &g_inst.g[gr->cull_src];
+            vis = ms->vis_count; visf = ms->visf_count;
+            if (vis > 0)  memcpy(gr->visible, ms->visible, (size_t)vis * 16 * sizeof(float));
+            if (visf > 0) memcpy(gr->lod_visible, ms->lod_visible, (size_t)visf * 16 * sizeof(float));
+            goto subir_al_gpu;
+        }
+        if (gr->grid_dirty) group_build_grid(gr);
+
+        /* Recorrido POR CELDAS: si una celda entera queda fuera, sus instancias
+           no se tocan. Sin esto se recorrian todas siempre, y por eso bajar la
+           distancia de dibujo no cambiaba nada. */
+        int ncells = gr->cside ? gr->cside * gr->cside : 1;
+        for (int cc = 0; cc < ncells; cc++) {
+            int t0 = 0, t1 = gr->count;
+            if (gr->cside) {
+                t0 = gr->cell_start[cc]; t1 = gr->cell_start[cc+1];
+                if (t0 >= t1) continue;
+                int ci = cc % gr->cside, cj = cc / gr->cside;
+                /* Caja de la celda, holgada con el tamano del propio modelo. */
+                float ex = (amx.x - amn.x), ey = (amx.y - amn.y), ez = (amx.z - amn.z);
+                Vec3 cmn = vec3_make(gr->cmin[0] + ci*gr->ccell - ex,
+                                     gr->cell_y[cc*2] + amn.y - ey,
+                                     gr->cmin[1] + cj*gr->ccell - ez);
+                Vec3 cmx = vec3_make(gr->cmin[0] + (ci+1)*gr->ccell + ex,
+                                     gr->cell_y[cc*2+1] + amx.y + ey,
+                                     gr->cmin[1] + (cj+1)*gr->ccell + ez);
+                /* Distancia: el punto de la caja mas cercano a la camara. */
+                float qx = cp.x < cmn.x ? cmn.x : (cp.x > cmx.x ? cmx.x : cp.x);
+                float qz = cp.z < cmn.z ? cmn.z : (cp.z > cmx.z ? cmx.z : cp.z);
+                float qy = cp.y < cmn.y ? cmn.y : (cp.y > cmx.y ? cmx.y : cp.y);
+                float ddx = qx-cp.x, ddy = qy-cp.y, ddz = qz-cp.z;
+                if (ddx*ddx + ddy*ddy + ddz*ddz > md2) continue;
+                if (!g3d_camera_frustum_contains_aabb(camera, cmn, cmx)) continue;
+            }
+        for (int t = t0; t < t1; t++) {
+            int n = gr->cside ? gr->cells[t] : t;
             float *m = &gr->mats[n * 16];
             float ix = m[12], iy = m[13], iz = m[14];
             float dx = ix - cp.x, dy = iy - cp.y, dz = iz - cp.z;
@@ -673,6 +805,11 @@ void g3d_instances_render_all(G3DCamera *camera, int flip_y) {
             }
         }
 
+        }   /* fin del bucle de celdas */
+
+        /* Lo recortado se guarda para que las piezas hermanas lo reutilicen. */
+        gr->vis_count = vis; gr->visf_count = visf;
+subir_al_gpu:
         /* NEAR batch: full mesh (skinned if the group is skinned). */
         if (vis > 0) {
             glBindVertexArray(gr->vao);
@@ -690,6 +827,7 @@ void g3d_instances_render_all(G3DCamera *camera, int flip_y) {
                 g3d_shader_set_int(sp, "uBoneCount", gr->skin_model->joint_count);
             } else g3d_shader_set_float(sp, "uWind", gr->wind);
             glDrawElementsInstanced(GL_TRIANGLES, gr->mesh->index_count, GL_UNSIGNED_INT, 0, vis);
+            g3d_renderer_add_stats(1, (gr->mesh->index_count / 3) * (uint32_t)vis);
         }
 
         /* FAR batch: auto-decimated STATIC mesh (never skinned -> cheap). */
@@ -705,6 +843,7 @@ void g3d_instances_render_all(G3DCamera *camera, int flip_y) {
             else g3d_shader_set_int(sp, "uHasTex", 0);
             g3d_shader_set_float(sp, "uWind", 0.0f);
             glDrawElementsInstanced(GL_TRIANGLES, gr->lod_mesh->index_count, GL_UNSIGNED_INT, 0, visf);
+            g3d_renderer_add_stats(1, (gr->lod_mesh->index_count / 3) * (uint32_t)visf);
         }
     }
     glBindVertexArray(0);

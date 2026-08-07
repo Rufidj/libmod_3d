@@ -257,6 +257,7 @@ void g3d_renderer_set_directional_light(Vec3 direction, Vec3 color,
                                         float intensity);
 
 /* Get renderer stats */
+void g3d_renderer_add_stats(uint32_t calls, uint32_t triangles);
 uint32_t g3d_renderer_get_draw_calls(void);
 uint32_t g3d_renderer_get_triangle_count(void);
 uint32_t g3d_renderer_get_culled_entities(void);

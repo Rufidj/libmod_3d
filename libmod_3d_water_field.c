@@ -358,6 +358,27 @@ static void wf_touch_bounds(int i, int j) {
     if (j > W.bj1) W.bj1 = j;
 }
 
+/* Vacia el agua del campo dejando el terreno. Sin esto, quien recompone el agua
+   (el editor al mover un lago, al borrarlo, o al previsualizar) solo podia
+   ANADIR: el agua de la version anterior se quedaba encima y el mapa se
+   inundaba solo con pasar el raton. */
+void g3d_waterfield_clear_water(void) {
+    if (!W.active) return;
+    int N = W.side * W.side;
+    if (W.d)  memset(W.d,  0, (size_t)N * sizeof(float));
+    if (W.fL) memset(W.fL, 0, (size_t)N * sizeof(float));
+    if (W.fR) memset(W.fR, 0, (size_t)N * sizeof(float));
+    if (W.fT) memset(W.fT, 0, (size_t)N * sizeof(float));
+    if (W.fB) memset(W.fB, 0, (size_t)N * sizeof(float));
+    if (W.vx) memset(W.vx, 0, (size_t)N * sizeof(float));
+    if (W.vz) memset(W.vz, 0, (size_t)N * sizeof(float));
+    if (W.hold) { free(W.hold); W.hold = NULL; }
+    W.any_wet = 0;
+    W.bi0 = W.bj0 = 0; W.bi1 = W.bj1 = W.side - 1;
+    W.sea_dirty = 1;          /* el mar vuelve a reclamar lo suyo */
+    W.revision = ++g_wf_revision_seq;
+}
+
 void g3d_waterfield_clear_holds(void) {
     if (W.hold) { free(W.hold); W.hold = NULL; W.revision = ++g_wf_revision_seq; }
 }
@@ -826,7 +847,13 @@ void g3d_waterfield_settle(float seconds) {
     for (int i = 0, n = W.side * W.side; i < n; i++)
         if (W.d[i] > maxd) maxd = W.d[i];
     int guard = 0;
-    while (t < seconds && guard < 8000) {
+    /* El tope tiene que dar para los segundos PEDIDOS. Estaba fijo en 8000
+       sub-pasos: con el paso estable de un campo lleno eso son unos 60 s, asi
+       que pedir 600 daba lo mismo que pedir 60 -- el rio nunca acababa de
+       llenarse por mucho que subieras el mando. */
+    int limite = (int)(seconds / 0.002f) + 1000;   /* 0.002 = paso minimo */
+    if (limite < 8000) limite = 8000;
+    while (t < seconds && guard < limite) {
         float h = wf_stable_step(maxd);
         maxd = wf_substep(h);
         t += h;

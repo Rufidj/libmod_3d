@@ -125,6 +125,11 @@ void g3d_waterfield_get_params(float *rain, float *sea, float *evap, float *visc
    body of water finite -- it can still spill, drain through a leaky basin, and
    reach equilibrium -- while making sure it never simply evaporates away.
    Clearing is the caller's job when it rebuilds its water. */
+/* Vacia el agua dejando el terreno. Lo necesita quien RECOMPONE el agua entera
+   (el editor cada vez que tocas un lago): sin esto solo se puede anadir, y el
+   agua de la version anterior se queda para siempre. */
+void g3d_waterfield_clear_water(void);
+
 void g3d_waterfield_clear_holds(void);
 
 /* Flood the basin containing (x,z) up to `level`: every connected cell whose
