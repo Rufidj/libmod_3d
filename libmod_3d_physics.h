@@ -58,6 +58,13 @@ void g3d_physics_set_gravity(float g);
 
 /* ---- static box colliders (AABB) ---- */
 
+/* Brazo de camara con colision: distancia SEGURA del objetivo a la camara.
+   Tiene en cuenta el terreno ademas de las cajas -- el raycast normal solo mira
+   las cajas, y por eso la camara de tercera persona se metia en las lomas. */
+float g3d_camera_safe_distance(float tx, float ty, float tz,
+                               float dx, float dy, float dz,
+                               float dist, float radius);
+
 int  g3d_collider_add_box(float minx, float miny, float minz,
                           float maxx, float maxy, float maxz);
 void g3d_collider_clear(void);

@@ -72,6 +72,10 @@ char * __bgdexport(libmod_3d, locals_def) =
     "   DOUBLE foam = 0.55;\n"
     "   DOUBLE surf = 0.9;\n"
     "   DOUBLE splash = 1.4;\n"
+    /* La SIMULACION tambien: una sequia o una tormenta son cambiar esto en
+       marcha, no recompilar. -1 = no tocar lo que ya haya. */
+    "   DOUBLE evaporation = -1.0;\n"
+    "   DOUBLE flow = -1.0;\n"
     "END\n"
     ;
 
@@ -363,6 +367,7 @@ int64_t g3d_char_z_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_grounded_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_physics_set_gravity_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_camera_safe_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_destroy_bgd(INSTANCE *my, int64_t *params);
@@ -516,6 +521,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CHAR_GROUNDED", "I", TYPE_INT, g3d_char_grounded_bgd),
     FUNC("G3D_PHYSICS_SET_GRAVITY", "F", TYPE_INT, g3d_physics_set_gravity_bgd),
     FUNC("G3D_COLLIDER_ADD_BOX", "FFFFFF", TYPE_INT, g3d_collider_add_box_bgd),
+    FUNC("G3D_CAMERA_SAFE_DISTANCE", "FFFFFFFF", TYPE_FLOAT, g3d_camera_safe_distance_bgd),
     FUNC("G3D_COLLIDER_CLEAR", "", TYPE_INT, g3d_collider_clear_bgd),
     FUNC("G3D_VEHICLE_CREATE", "FFFF", TYPE_INT, g3d_vehicle_create_bgd),
     FUNC("G3D_VEHICLE_DESTROY", "I", TYPE_INT, g3d_vehicle_destroy_bgd),

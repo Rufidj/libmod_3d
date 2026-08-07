@@ -8,6 +8,7 @@
 #include "libmod_3d_mesh.h"
 #include "libmod_3d_math.h"
 #include <math.h>
+#include "libmod_3d_scenefile.h"
 
 static float g_res_x = 0.0f, g_res_z = 0.0f;
 static float g_hit_x = 0.0f, g_hit_y = 0.0f, g_hit_z = 0.0f;
@@ -34,6 +35,43 @@ static int entity_world_aabb(int eid, float *mn, float *mx) {
         first = 0;
     }
     return 1;
+}
+
+/* Brazo de camara con colision. Devuelve la distancia SEGURA entre el objetivo
+   y la camara: si el terreno o un collider se interponen, acerca la camara
+   hasta justo antes del estorbo.
+   El raycast normal solo mira las cajas de las entidades -- el terreno no --, y
+   por eso en tercera persona la camara se metia dentro de una loma y el
+   personaje desaparecia.
+   Se muestrea el segmento en vez de resolver la interseccion: el terreno es un
+   campo de alturas, no una superficie analitica, y una loma entre medias no la
+   detecta ningun test de extremos. */
+float g3d_camera_safe_distance(float tx, float ty, float tz,
+                               float dx, float dy, float dz,
+                               float dist, float radius) {
+    if (dist <= 0.0f) return 0.0f;
+    float len = sqrtf(dx*dx + dy*dy + dz*dz);
+    if (len < 1e-6f) return dist;
+    dx /= len; dy /= len; dz /= len;
+
+    /* Primero lo que ya sabe resolver: cajas de entidades. */
+    float hit = g3d_collide_raycast(tx, ty, tz, dx, dy, dz, dist);
+    float best = (hit >= 0.0f && hit < dist) ? hit : dist;
+
+    /* Y ahora el terreno, paso a paso. El margen deja la camara POR ENCIMA del
+       suelo, no rozandolo: pegada al terreno se ve el interior de la loma. */
+    const int PASOS = 24;
+    for (int i = 1; i <= PASOS; i++) {
+        float d = best * (float)i / (float)PASOS;
+        float px = tx + dx*d, py = ty + dy*d, pz = tz + dz*d;
+        float suelo = g3d_scene_terrain_height(px, pz);
+        if (py - radius < suelo) {
+            /* Se para en el paso anterior, con un poco de holgura. */
+            float seguro = best * (float)(i-1) / (float)PASOS - radius * 0.5f;
+            return seguro > 0.5f ? seguro : 0.5f;
+        }
+    }
+    return best;
 }
 
 int g3d_collide_move_character(float x, float y, float z, float radius,

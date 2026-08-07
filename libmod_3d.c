@@ -14,6 +14,7 @@
 #include "libmod_3d_terrain.h"
 #include "libmod_3d_zone.h"
 #include "libmod_3d_water.h"
+#include "libmod_3d_water_field.h"
 #include "libmod_3d_water_render.h"
 #include "libmod_3d_water_splash.h"
 #include "libmod_3d_scatter.h"
@@ -94,6 +95,8 @@ enum {
     LOC3D_W_FOAM,
     LOC3D_W_SURF,
     LOC3D_W_SPLASH,
+    LOC3D_W_EVAP,
+    LOC3D_W_FLOW,
     LOC3D_ALPHA,
     LOC3D_COLORR,
     LOC3D_COLORG,
@@ -136,6 +139,8 @@ DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
     { "water.foam"       , NULL, -1, -1 },
     { "water.surf"       , NULL, -1, -1 },
     { "water.splash"     , NULL, -1, -1 },
+    { "water.evaporation", NULL, -1, -1 },
+    { "water.flow"       , NULL, -1, -1 },
     /* BennuGD's per-graphic locals (declared by libbggfx) - resolved by NAME to
        the SAME process storage, so g3d entities can obey the standard alpha /
        color / blend locals with the normal LOCBYTE/LOCINT64 macros. */
@@ -2352,6 +2357,13 @@ int64_t g3d_char_y_bgd(INSTANCE *my, int64_t *params) { float v = g3d_char_y((in
 int64_t g3d_char_z_bgd(INSTANCE *my, int64_t *params) { float v = g3d_char_z((int)params[0]); return (int64_t) * (int32_t *)&v; }
 int64_t g3d_char_grounded_bgd(INSTANCE *my, int64_t *params) { return g3d_char_grounded((int)params[0]); }
 int64_t g3d_physics_set_gravity_bgd(INSTANCE *my, int64_t *params) { g3d_physics_set_gravity(*(float *)&params[0]); return 1; }
+int64_t g3d_camera_safe_distance_bgd(INSTANCE *my, int64_t *params) {
+    float v = g3d_camera_safe_distance(*(float *)&params[0], *(float *)&params[1],
+                                       *(float *)&params[2], *(float *)&params[3],
+                                       *(float *)&params[4], *(float *)&params[5],
+                                       *(float *)&params[6], *(float *)&params[7]);
+    return (int64_t) * (int32_t *)&v;
+}
 int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params) {
     return g3d_collider_add_box(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
                                 *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
@@ -2577,6 +2589,13 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
             g3d_water_render_set_surf_wave((float) LOCDOUBLE( libmod_3d, i, LOC3D_W_SURF ),
                                            (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_X ));
             g3d_water_splash_set_amount((float) LOCDOUBLE( libmod_3d, i, LOC3D_W_SPLASH ));
+            /* La simulacion solo si el proceso la fija: -1 significa "no toques
+               lo que la escena haya dejado puesto", para que un proceso de agua
+               no pise sin querer los ajustes con los que se compuso. */
+            double ev = LOCDOUBLE( libmod_3d, i, LOC3D_W_EVAP );
+            if ( ev >= 0.0 ) g3d_waterfield_set_evaporation( (float) ev );
+            double fl = LOCDOUBLE( libmod_3d, i, LOC3D_W_FLOW );
+            if ( fl >= 0.0 ) g3d_waterfield_set_viscosity( (float) fl );
             break;
         }
 

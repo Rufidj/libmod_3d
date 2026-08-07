@@ -71,6 +71,35 @@ static G3DModel *sc_load_model(const char *asset) {
     return g3d_gltf_load(path);
 }
 
+/* Une varias submallas en una sola. Un modelo descargado viene partido por
+   materiales -- palm.glb trae 33 piezas -- y cada pieza era un grupo aparte: su
+   propio recorte, su propia subida a la GPU y su propia llamada de dibujo, todo
+   repetido para dibujar el mismo arbol. Casi nunca hay 33 texturas distintas:
+   uniendo las que comparten textura, 31 grupos se quedan en dos o tres. */
+static G3DMesh *sc_merge(G3DMesh **src, int n, const char *name) {
+    if (n <= 0) return NULL;
+    uint32_t nv = 0, ni = 0;
+    for (int i = 0; i < n; i++) { nv += src[i]->vertex_count; ni += src[i]->index_count; }
+    if (!nv || !ni) return NULL;
+    G3DVertex *vs = (G3DVertex *)malloc((size_t)nv * sizeof(G3DVertex));
+    uint32_t  *is = (uint32_t  *)malloc((size_t)ni * sizeof(uint32_t));
+    if (!vs || !is) { free(vs); free(is); return NULL; }
+    uint32_t vo = 0, io = 0;
+    for (int i = 0; i < n; i++) {
+        memcpy(vs + vo, src[i]->vertices, (size_t)src[i]->vertex_count * sizeof(G3DVertex));
+        /* Los indices de cada pieza cuentan desde SU primer vertice: hay que
+           correrlos por los que ya llevamos puestos. */
+        for (uint32_t k = 0; k < src[i]->index_count; k++)
+            is[io + k] = src[i]->indices[k] + vo;
+        vo += src[i]->vertex_count;
+        io += src[i]->index_count;
+    }
+    G3DMesh *m = g3d_mesh_create(name, vs, nv, is, ni);
+    free(vs); free(is);
+    if (m) g3d_mesh_upload_gpu(m);
+    return m;
+}
+
 static SCKind *sc_find(const char *asset, int create) {
     for (int i = 0; i < g_kinds; i++)
         if (g_kind[i].asset && strcmp(g_kind[i].asset, asset) == 0) return &g_kind[i];
@@ -227,7 +256,34 @@ int g3d_scatter_build(float wind_scale) {
         } else {
             G3DModel *m = sc_load_model(k->asset);
             if (!m || m->mesh_count == 0) continue;
-            for (unsigned int sm = 0; sm < m->mesh_count && k->ngroups < SC_MAX_SUB; sm++) {
+            /* Primero se agrupan las piezas POR TEXTURA; luego cada grupo se
+               une en una sola malla. */
+            void *tex_of[SC_MAX_SUB];
+            G3DMesh *bucket[SC_MAX_SUB][SC_MAX_SUB];
+            int      bn[SC_MAX_SUB], nb = 0;
+            for (unsigned int sm = 0; sm < m->mesh_count; sm++) {
+                if (m->mesh_outline && m->mesh_outline[sm]) continue;
+                void *tx = NULL;
+                if (m->mesh_textures && m->mesh_textures[sm]) tx = m->mesh_textures[sm];
+                else if (m->albedo_texture)                   tx = m->albedo_texture;
+                int b = -1;
+                for (int q = 0; q < nb; q++) if (tex_of[q] == tx) { b = q; break; }
+                if (b < 0) {
+                    if (nb >= SC_MAX_SUB) continue;
+                    b = nb++; tex_of[b] = tx; bn[b] = 0;
+                }
+                if (bn[b] < SC_MAX_SUB) bucket[b][bn[b]++] = &m->meshes[sm];
+            }
+            for (int b = 0; b < nb && k->ngroups < SC_MAX_SUB; b++) {
+                G3DMesh *use = (bn[b] == 1) ? bucket[b][0]
+                                            : sc_merge(bucket[b], bn[b], k->asset);
+                if (!use) use = bucket[b][0];
+                int g = g3d_instances_create(use, tex_of[b]);
+                if (g < 0) continue;
+                g3d_instances_set_alpha_cut(g, 1);
+                k->groups[k->ngroups++] = g;
+            }
+            for (unsigned int sm = 0; sm < 0; sm++) {
                 /* Las submallas de CONTORNO son una copia negra e inflada del
                    modelo, para el borde estilo comic. Instanciadas normalmente
                    taparian de negro todo lo demas. */
