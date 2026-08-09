@@ -136,7 +136,11 @@ static void spl_falls(float dt) {
 static void spl_obstacles(float dt) {
     int count = 0;
     int *ents = g3d_scene_impl_get_entities(&count);
-    if (!ents || count <= 0) { g3d_waterfield_set_obstacles(NULL, 0); return; }
+    if (!ents || count <= 0) {
+        g3d_waterfield_set_obstacles(NULL, 0);
+        g3d_water_falls_set_obstacles(NULL, 0);
+        return;
+    }
 
     /* Collected while walking the scene and handed to the field in one go, so
        the water actually goes ROUND the rocks instead of through them. The
@@ -144,10 +148,30 @@ static void spl_obstacles(float dt) {
        same list of things standing in the water. */
     static float boxes[SPL_MAX_TRACKED * 4];
     int nboxes = 0;
+    /* Y aparte, con ALTURA, lo que estorba a una cascada. No vale la misma
+       lista: la de arriba solo recoge lo que esta metido en agua con fondo
+       suficiente, y una roca a media pared de una cascada no lo esta nunca --
+       el agua le pasa por delante, no por debajo. Ademas una cortina es
+       vertical, asi que necesita saber hasta donde llega la piedra, y el mask
+       del campo es plano. */
+    static float fboxes[SPL_MAX_TRACKED * 6];
+    int nfboxes = 0;
 
     for (int i = 0; i < count; i++) {
         float mn[3], mx[3];
         if (!spl_entity_aabb(ents[i], mn, mx)) continue;
+
+        if (nfboxes < SPL_MAX_TRACKED) {
+            const float fcore = 0.8f;
+            float fcx = (mn[0] + mx[0]) * 0.5f, fcz = (mn[2] + mx[2]) * 0.5f;
+            float frx = (mx[0] - mn[0]) * 0.5f, frz = (mx[2] - mn[2]) * 0.5f;
+            if (frx > 0.001f || frz > 0.001f) {
+                float *fb = &fboxes[nfboxes * 6];
+                fb[0] = fcx - frx * fcore; fb[1] = mn[1]; fb[2] = fcz - frz * fcore;
+                fb[3] = fcx + frx * fcore; fb[4] = mx[1]; fb[5] = fcz + frz * fcore;
+                nfboxes++;
+            }
+        }
 
         float cx = (mn[0] + mx[0]) * 0.5f;
         float cz = (mn[2] + mx[2]) * 0.5f;
@@ -212,6 +236,7 @@ static void spl_obstacles(float dt) {
     }
 
     g3d_waterfield_set_obstacles(nboxes ? boxes : NULL, nboxes);
+    g3d_water_falls_set_obstacles(nfboxes ? fboxes : NULL, nfboxes);
 }
 
 /* --------------------------------------------------------------------------- */

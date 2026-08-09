@@ -33,6 +33,11 @@
 #define WF_MAX_SHEETS 4096
 #define WF_FLOATS_PER_VERT 6      /* xyz + (u, v, fallHeight) */
 #define WF_MAX_FEET 256
+#define WF_MAX_OBST 64
+/* En cuantas tiras se parte una cortina que se topa con una roca. Solo se usa
+   cuando de verdad hay algo delante: sin rocas la cortina sigue siendo UN quad,
+   como antes, asi que esto no cuesta nada en el caso normal. */
+#define WF_SPLIT_COLS 8
 
 static struct {
     int inited, failed;
@@ -49,6 +54,16 @@ static struct {
        off it as soon as the river shifts. */
     float feet[WF_MAX_FEET * 5];
     int   nfeet;
+
+    /* Rocks standing in the falling water. Kept here and not in the field
+       because the field's mask is flat and only covers what is standing in
+       water deep enough to register -- neither is true of a rock halfway down
+       a cliff. */
+    float obst[WF_MAX_OBST * 6];
+    int   nobst;
+    unsigned int obst_rev;        /* bumped when the set really changes */
+    unsigned int built_obst_rev;  /* the set the geometry reflects */
+    int   splits;                 /* curtains parted last build */
 } F = { .threshold = 1.5f, .foam = 1.0f, .mist = 1.0f };
 
 static char *falls_src(const char *body, int frag) {
@@ -93,6 +108,107 @@ static void falls_push_quad(float *v, int *n, float ax, float az, float bx, floa
     }
 }
 
+/* El trozo de roca que tapa la columna (x,z), si es que hay alguna. Devuelve 1 y
+   rellena el tramo vertical que estorba. Con varias rocas encima se queda con la
+   union, que para una cortina de un metro de ancho es lo mismo y evita partirla
+   en pedazos que luego se solapan. */
+static int falls_blocked_at(float x, float z, float *oy0, float *oy1) {
+    int hit = 0;
+    for (int b = 0; b < F.nobst; b++) {
+        const float *r = &F.obst[b * 6];
+        if (x < r[0] || x > r[3] || z < r[2] || z > r[5]) continue;
+        if (!hit) { *oy0 = r[1]; *oy1 = r[4]; hit = 1; }
+        else { if (r[1] < *oy0) *oy0 = r[1]; if (r[4] > *oy1) *oy1 = r[4]; }
+    }
+    return hit;
+}
+
+/* ¿Estorba algo a esta cortina? Se mira antes de partir nada: si no hay roca
+   delante -- que es lo normal -- la cortina sale de una pieza igual que siempre,
+   sin columnas ni costuras. */
+static int falls_any_obstacle(float ax, float az, float bx, float bz,
+                              float top, float bottom) {
+    if (F.nobst <= 0) return 0;
+    float x0 = ax < bx ? ax : bx, x1 = ax < bx ? bx : ax;
+    float z0 = az < bz ? az : bz, z1 = az < bz ? bz : az;
+    for (int b = 0; b < F.nobst; b++) {
+        const float *r = &F.obst[b * 6];
+        if (r[3] < x0 || r[0] > x1) continue;
+        if (r[5] < z0 || r[2] > z1) continue;
+        if (r[4] < bottom || r[1] > top) continue;   /* pasa por encima o por debajo */
+        return 1;
+    }
+    return 0;
+}
+
+/* Suelta una cortina, partiendola si hay una roca delante.
+ *
+ * El agua que cae contra una piedra no la atraviesa: se abre a los lados, deja
+ * seco lo que hay justo detras y vuelve a juntarse mas abajo. Eso es lo que hace
+ * esto -- la cortina se divide en tiras a lo ancho, y la tira que se topa con la
+ * roca se corta en dos trozos, el de encima y el de debajo, dejando el hueco.
+ *
+ * Sin rocas delante sale UN quad, exactamente el de antes: ni una costura de mas
+ * ni un triangulo de mas en el caso normal, que es la inmensa mayoria. */
+static void falls_emit_sheet(float *v, int *nv, int *quads,
+                             float ax, float az, float bx, float bz,
+                             float top, float bottom, float v0, float v1,
+                             float total) {
+    if (*quads >= WF_MAX_SHEETS) return;
+    if (top - bottom <= 0.001f) return;
+
+    if (!falls_any_obstacle(ax, az, bx, bz, top, bottom)) {
+        falls_push_quad(v, nv, ax, az, bx, bz, top, bottom, v0, v1, total);
+        (*quads)++;
+        return;
+    }
+
+    float span = top - bottom;
+    int parted = 0;
+    for (int cix = 0; cix < WF_SPLIT_COLS && *quads < WF_MAX_SHEETS - 2; cix++) {
+        float f0 = (float)cix / (float)WF_SPLIT_COLS;
+        float f1 = (float)(cix + 1) / (float)WF_SPLIT_COLS;
+        float cx0 = ax + (bx - ax) * f0, cz0 = az + (bz - az) * f0;
+        float cx1 = ax + (bx - ax) * f1, cz1 = az + (bz - az) * f1;
+        float mx = (cx0 + cx1) * 0.5f, mz = (cz0 + cz1) * 0.5f;
+
+        float oy0, oy1;
+        if (!falls_blocked_at(mx, mz, &oy0, &oy1) || oy1 <= bottom || oy0 >= top) {
+            falls_push_quad(v, nv, cx0, cz0, cx1, cz1, top, bottom, v0, v1, total);
+            (*quads)++;
+            continue;
+        }
+        if (oy0 < bottom) oy0 = bottom;
+        if (oy1 > top)    oy1 = top;
+        parted = 1;
+
+        /* El trozo de ARRIBA, hasta donde empieza la roca. */
+        if (top - oy1 > 0.02f) {
+            float vb = v0 + (v1 - v0) * (top - oy1) / span;
+            falls_push_quad(v, nv, cx0, cz0, cx1, cz1, top, oy1, v0, vb, total);
+            (*quads)++;
+        }
+        /* Y el de ABAJO, desde el pie de la roca: es lo que hace que el agua se
+           vuelva a juntar en vez de quedar cortada hasta el suelo. */
+        if (oy0 - bottom > 0.02f) {
+            float va = v0 + (v1 - v0) * (top - oy0) / span;
+            falls_push_quad(v, nv, cx0, cz0, cx1, cz1, oy0, bottom, va, v1, total);
+            (*quads)++;
+        }
+        /* Y donde golpea, que salpique. Se apunta como un pie de cascada mas: la
+           espuma sale de la misma lista que la del fondo, asi que no puede
+           quedarse desplazada respecto a la cortina. */
+        if (F.nfeet < WF_MAX_FEET && oy1 < top - 0.02f) {
+            float *ft = &F.feet[F.nfeet * 5];
+            ft[0] = mx; ft[1] = oy1; ft[2] = mz;
+            ft[3] = top - oy1;                       /* lo que ha caido hasta pegar */
+            ft[4] = fabsf(cx1 - cx0) + fabsf(cz1 - cz0);
+            F.nfeet++;
+        }
+    }
+    if (parted) F.splits++;
+}
+
 /* The shared edge between a cell and the neighbour it spills into. */
 static void falls_edge(int i, int j, int di, int dj, int S, float ws, float cell,
                        float *ax, float *az, float *bx, float *bz) {
@@ -116,12 +232,18 @@ static void falls_build(void);
    at their feet come off the same build, so neither can drift from the other. */
 static void falls_build_if_needed(void) {
     unsigned int rev = g3d_waterfield_revision();
-    if (rev != F.field_rev) { F.field_rev = rev; falls_build(); }
+    /* Tambien hay que rehacerla si se han movido las rocas: la cortina se parte
+       segun donde estan, asi que un cambio ahi cambia la geometria igual que un
+       cambio del campo. */
+    if (rev != F.field_rev || F.obst_rev != F.built_obst_rev) {
+        F.field_rev = rev; F.built_obst_rev = F.obst_rev; falls_build();
+    }
 }
 
 static void falls_build(void) {
     F.sheets = 0;
     F.nfeet = 0;
+    F.splits = 0;
     if (!g3d_waterfield_active()) return;
 
     int S = g3d_waterfield_side();
@@ -233,9 +355,8 @@ static void falls_build(void) {
                 float ax, az, bx, bz;
                 falls_edge(cc % S, cc / S, di[kk], dj[kk], S, ws, cell,
                            &ax, &az, &bx, &bz);
-                falls_push_quad(verts, &nv, ax, az, bx, bz, top, landing,
-                                0.0f, 1.0f, total);
-                quads++;
+                falls_emit_sheet(verts, &nv, &quads, ax, az, bx, bz, top, landing,
+                                 0.0f, 1.0f, total);
                 continue;
             }
 
@@ -255,9 +376,8 @@ static void falls_build(void) {
                 float ax, az, bx, bz;
                 falls_edge(cc % S, cc / S, di[kk], dj[kk], S, ws, cell,
                            &ax, &az, &bx, &bz);
-                falls_push_quad(verts, &nv, ax, az, bx, bz, segTop, segBot,
-                                v0, v1 > 1.0f ? 1.0f : v1, total);
-                quads++;
+                falls_emit_sheet(verts, &nv, &quads, ax, az, bx, bz, segTop, segBot,
+                                 v0, v1 > 1.0f ? 1.0f : v1, total);
             }
         }
     }
@@ -373,6 +493,21 @@ int g3d_water_falls_feet(float *out, int max) {
 }
 
 int g3d_water_falls_count(void) { return F.sheets; }
+int g3d_water_falls_split_count(void) { return F.splits; }
+
+void g3d_water_falls_set_obstacles(const float *boxes, int n) {
+    if (n < 0) n = 0;
+    if (n > WF_MAX_OBST) n = WF_MAX_OBST;
+    if (!boxes) n = 0;
+    /* Solo se toca la revision si la lista CAMBIA de verdad. Esto se llama cada
+       frame desde el recorrido de la escena, y sin la comparacion una roca
+       quieta reconstruiria toda la geometria sesenta veces por segundo. */
+    if (n == F.nobst &&
+        (n == 0 || memcmp(F.obst, boxes, (size_t)n * 6 * sizeof(float)) == 0)) return;
+    if (n > 0) memcpy(F.obst, boxes, (size_t)n * 6 * sizeof(float));
+    F.nobst = n;
+    F.obst_rev++;
+}
 
 void g3d_water_falls_shutdown(void) {
     if (F.prog) { g3d_shader_free(F.prog); F.prog = NULL; }
@@ -387,6 +522,8 @@ void g3d_water_falls_render(G3DCamera *c, int f) { (void)c; (void)f; }
 void g3d_water_falls_set_threshold(float d) { (void)d; }
 void g3d_water_falls_set_style(float f, float m) { (void)f; (void)m; }
 int  g3d_water_falls_count(void) { return 0; }
+int  g3d_water_falls_split_count(void) { return 0; }
+void g3d_water_falls_set_obstacles(const float *b, int n) { (void)b; (void)n; }
 void g3d_water_falls_shutdown(void) {}
 
 #endif
