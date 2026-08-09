@@ -135,6 +135,19 @@ int main(void) {
     snprintf(b, sizeof b, "%d partidas", g3d_water_falls_split_count());
     check("y sin marcas de partido", g3d_water_falls_split_count() == 0, b);
 
+    printf("3b. una roca DESPLAZADA del plano del chorro tambien lo parte\n");
+    /* Este es el caso de verdad, y el que fallaba: la cortina se guarda como un
+       plano de grosor cero, y una piedra que no lo cruce exactamente no la tocaba
+       nunca. Aqui la roca esta al lado del plano, no encima -- que es como queda
+       cualquier roca puesta a ojo en un rio que cae. */
+    float ladeada[6] = { -0.2f, ROCK_Y0, -4.0f, 4.0f, ROCK_Y1, 4.0f };
+    g3d_water_falls_set_obstacles(ladeada, 1);
+    rebuild();
+    snprintf(b, sizeof b, "%d cortinas, %d partidas",
+             g3d_water_falls_count(), g3d_water_falls_split_count());
+    check("la parte aunque no cruce el plano exacto",
+          g3d_water_falls_split_count() > 0, b);
+
     printf("4. una roca fuera del salto no toca nada\n");
     float lejos[6] = { 40.0f, 0.0f, 40.0f, 46.0f, 6.0f, 46.0f };
     g3d_water_falls_set_obstacles(lejos, 1);

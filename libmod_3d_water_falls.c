@@ -62,6 +62,7 @@ static struct {
     float obst[WF_MAX_OBST * 6];
     int   nobst;
     unsigned int obst_rev;        /* bumped when the set really changes */
+    float thick;                  /* grosor del chorro: una celda del campo */
     unsigned int built_obst_rev;  /* the set the geometry reflects */
     int   splits;                 /* curtains parted last build */
 } F = { .threshold = 1.5f, .foam = 1.0f, .mist = 1.0f };
@@ -114,9 +115,10 @@ static void falls_push_quad(float *v, int *n, float ax, float az, float bx, floa
    en pedazos que luego se solapan. */
 static int falls_blocked_at(float x, float z, float *oy0, float *oy1) {
     int hit = 0;
+    float th = F.thick;
     for (int b = 0; b < F.nobst; b++) {
         const float *r = &F.obst[b * 6];
-        if (x < r[0] || x > r[3] || z < r[2] || z > r[5]) continue;
+        if (x < r[0] - th || x > r[3] + th || z < r[2] - th || z > r[5] + th) continue;
         if (!hit) { *oy0 = r[1]; *oy1 = r[4]; hit = 1; }
         else { if (r[1] < *oy0) *oy0 = r[1]; if (r[4] > *oy1) *oy1 = r[4]; }
     }
@@ -129,8 +131,15 @@ static int falls_blocked_at(float x, float z, float *oy0, float *oy1) {
 static int falls_any_obstacle(float ax, float az, float bx, float bz,
                               float top, float bottom) {
     if (F.nobst <= 0) return 0;
-    float x0 = ax < bx ? ax : bx, x1 = ax < bx ? bx : ax;
-    float z0 = az < bz ? az : bz, z1 = az < bz ? bz : az;
+    /* La cortina se guarda como un plano de GROSOR CERO: para un salto orientado
+       en x, todos sus vertices comparten la misma x. Pedir que la caja de la roca
+       cruce ese plano exacto no lo cumple casi nunca -- basta con que la piedra
+       este medio metro delante o detras y el agua le pasaba por dentro igual que
+       antes. Un rio cayendo no es una lamina infinitamente fina, asi que se le da
+       el grosor de una celda, que es el ancho real del chorro. */
+    float th = F.thick;
+    float x0 = (ax < bx ? ax : bx) - th, x1 = (ax < bx ? bx : ax) + th;
+    float z0 = (az < bz ? az : bz) - th, z1 = (az < bz ? bz : az) + th;
     for (int b = 0; b < F.nobst; b++) {
         const float *r = &F.obst[b * 6];
         if (r[3] < x0 || r[0] > x1) continue;
@@ -254,6 +263,7 @@ static void falls_build(void) {
     if (!g3d_waterfield_wet_bounds(&i0, &j0, &i1, &j1)) return;
 
     float cell = ws / (float)(S - 1);
+    F.thick = cell * 0.75f;
     float *verts = (float *)malloc((size_t)WF_MAX_SHEETS * 6 * WF_FLOATS_PER_VERT * sizeof(float));
     if (!verts) return;
     int nv = 0, quads = 0;

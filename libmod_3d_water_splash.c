@@ -26,6 +26,7 @@
 #include "libmod_3d_mesh.h"
 #include "libmod_3d_math.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
