@@ -52,12 +52,12 @@ static struct {
 /* World-space AABB of a solid collider. Deliberately a local copy of the one in
    libmod_3d_collide.c: the splashes are a renderer-side effect and must not
    drag the collision system into the build on platforms that skip it. */
-static int spl_entity_aabb(int eid, float *mn, float *mx) {
+/* La caja de UNA entidad con malla propia. */
+static int spl_mesh_aabb(int eid, float *mn, float *mx, int *first_io) {
     G3DEntity *e = g3d_entity_impl_get(eid);
-    if (!e || !e->active || !e->collider || !e->mesh) return 0;
+    if (!e || !e->active || !e->mesh) return 0;
     G3DMesh *m = (G3DMesh *)e->mesh;
     Mat4 w = g3d_entity_impl_get_world_matrix(eid);
-    int first = 1;
     for (int c = 0; c < 8; c++) {
         Vec3 corner = vec3_make((c & 1) ? m->aabb_max[0] : m->aabb_min[0],
                                 (c & 2) ? m->aabb_max[1] : m->aabb_min[1],
@@ -65,12 +65,40 @@ static int spl_entity_aabb(int eid, float *mn, float *mx) {
         Vec3 p = mat4_transform_point(w, corner);
         float pp[3] = { p.x, p.y, p.z };
         for (int k = 0; k < 3; k++) {
-            if (first || pp[k] < mn[k]) mn[k] = pp[k];
-            if (first || pp[k] > mx[k]) mx[k] = pp[k];
+            if (*first_io || pp[k] < mn[k]) mn[k] = pp[k];
+            if (*first_io || pp[k] > mx[k]) mx[k] = pp[k];
         }
-        first = 0;
+        *first_io = 0;
     }
     return 1;
+}
+
+/* La caja de lo que el usuario ve como UN objeto.
+ *
+ * Un modelo cargado no es una entidad: g3d_model_spawn crea un root VACIO -- sin
+ * malla, no se dibuja -- y le cuelga una entidad por submalla. El editor marca
+ * como solido ese root, que es el que te devuelve. Pero aqui se pedia
+ * `e->collider && e->mesh` a la MISMA entidad, y eso no lo cumple nadie: el root
+ * lleva la marca y no tiene malla, y los hijos tienen malla y no llevan marca.
+ * Resultado medido en una escena de verdad: 148 entidades, 0 validas, y por
+ * tanto ni el rio rodeaba las rocas, ni salpicaba en ellas, ni la cascada se
+ * partia -- las tres cosas comen de esta lista.
+ *
+ * Asi que la marca se busca en el root y la geometria en sus hijos. */
+static int spl_entity_aabb(int eid, float *mn, float *mx) {
+    G3DEntity *e = g3d_entity_impl_get(eid);
+    if (!e || !e->active) return 0;
+    if (!e->collider) return 0;
+    int first = 1;
+    spl_mesh_aabb(eid, mn, mx, &first);      /* por si la lleva el mismo */
+    int n = 0;
+    int *all = g3d_scene_impl_get_entities(&n);
+    for (int i = 0; i < n && all; i++) {
+        G3DEntity *c = g3d_entity_impl_get(all[i]);
+        if (c && c->active && c->mesh && c->parent_id == eid)
+            spl_mesh_aabb(all[i], mn, mx, &first);
+    }
+    return !first;                            /* 1 si se junto alguna malla */
 }
 
 static float *spl_budget_for(int eid) {
