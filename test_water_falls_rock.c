@@ -21,7 +21,7 @@
 #define S  129
 #define WS 128.0f
 /* Las tiras en que se parte una cortina (WF_SPLIT_COLS del modulo). */
-#define WF_COLS_TEST 8
+#define WF_COLS_TEST 4
 
 static float terr[S*S];
 static int fails = 0;

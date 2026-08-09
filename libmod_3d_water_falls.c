@@ -37,7 +37,7 @@
 /* En cuantas tiras se parte una cortina que se topa con una roca. Solo se usa
    cuando de verdad hay algo delante: sin rocas la cortina sigue siendo UN quad,
    como antes, asi que esto no cuesta nada en el caso normal. */
-#define WF_SPLIT_COLS 8
+#define WF_SPLIT_COLS 4
 
 static struct {
     int inited, failed;
@@ -102,6 +102,30 @@ static void falls_push_quad(float *v, int *n, float ax, float az, float bx, floa
         float y = ti[k] ? top : bottom;
         float *p = &v[(*n) * WF_FLOATS_PER_VERT];
         p[0] = x; p[1] = y; p[2] = z;
+        p[3] = along_x ? x : z;
+        p[4] = ti[k] ? v0 : v1;
+        p[5] = total;
+        (*n)++;
+    }
+}
+
+/* Como el de arriba pero con el borde de ABAJO en otro sitio que el de arriba.
+   Es lo que permite que el agua se APARTE al chocar en vez de quedarse cortada:
+   un trozo que baja abriendose hacia el lado, y otro que vuelve a cerrarse. */
+static void falls_push_quad_skew(float *v, int *n,
+                                 float atx, float atz, float btx, float btz,
+                                 float abx, float abz, float bbx, float bbz,
+                                 float top, float bottom,
+                                 float v0, float v1, float total) {
+    const int ai[6] = { 1, 0, 1, 0, 1, 0 };
+    const int ti[6] = { 1, 1, 0, 1, 0, 0 };
+    int along_x = (atx != btx);
+    for (int k = 0; k < 6; k++) {
+        float x, z;
+        if (ti[k]) { x = ai[k] ? atx : btx; z = ai[k] ? atz : btz; }
+        else       { x = ai[k] ? abx : bbx; z = ai[k] ? abz : bbz; }
+        float *p = &v[(*n) * WF_FLOATS_PER_VERT];
+        p[0] = x; p[1] = ti[k] ? top : bottom; p[2] = z;
         p[3] = along_x ? x : z;
         p[4] = ti[k] ? v0 : v1;
         p[5] = total;
@@ -191,17 +215,31 @@ static void falls_emit_sheet(float *v, int *nv, int *quads,
         if (oy1 > top)    oy1 = top;
         parted = 1;
 
-        /* El trozo de ARRIBA, hasta donde empieza la roca. */
+        /* Hacia donde se aparta esta tira: hacia el lado mas cercano de la roca,
+           que es por donde el agua puede escaparse. Cortar y ya deja un agujero
+           limpio, y el agua de verdad no se corta -- se abre. */
+        float fmid = (f0 + f1) * 0.5f;
+        float dir = (fmid < 0.5f) ? -1.0f : 1.0f;
+        float sh  = dir * (bx - ax) / (float)WF_SPLIT_COLS * 0.9f;
+        float shz = dir * (bz - az) / (float)WF_SPLIT_COLS * 0.9f;
+
+        /* El trozo de ARRIBA, hasta donde empieza la roca, ABRIENDOSE al bajar:
+           llega a la piedra ya desviado hacia el lado. */
         if (top - oy1 > 0.02f) {
             float vb = v0 + (v1 - v0) * (top - oy1) / span;
-            falls_push_quad(v, nv, cx0, cz0, cx1, cz1, top, oy1, v0, vb, total);
+            falls_push_quad_skew(v, nv, cx0, cz0, cx1, cz1,
+                                 cx0 + sh, cz0 + shz, cx1 + sh, cz1 + shz,
+                                 top, oy1, v0, vb, total);
             (*quads)++;
         }
-        /* Y el de ABAJO, desde el pie de la roca: es lo que hace que el agua se
-           vuelva a juntar en vez de quedar cortada hasta el suelo. */
+        /* Y el de ABAJO, que arranca desviado y vuelve a su sitio: es lo que
+           hace que el agua se JUNTE otra vez bajo la roca en vez de quedarse
+           partida hasta el suelo. */
         if (oy0 - bottom > 0.02f) {
             float va = v0 + (v1 - v0) * (top - oy0) / span;
-            falls_push_quad(v, nv, cx0, cz0, cx1, cz1, oy0, bottom, va, v1, total);
+            falls_push_quad_skew(v, nv, cx0 + sh, cz0 + shz, cx1 + sh, cz1 + shz,
+                                 cx0, cz0, cx1, cz1,
+                                 oy0, bottom, va, v1, total);
             (*quads)++;
         }
         /* Y donde golpea, que salpique. Se apunta como un pie de cascada mas: la

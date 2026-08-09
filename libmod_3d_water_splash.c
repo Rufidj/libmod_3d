@@ -194,7 +194,17 @@ static void spl_obstacles(float dt) {
             const float fcore = 0.8f;
             float fcx = (mn[0] + mx[0]) * 0.5f, fcz = (mn[2] + mx[2]) * 0.5f;
             float frx = (mx[0] - mn[0]) * 0.5f, frz = (mx[2] - mn[2]) * 0.5f;
-            if (frx > 0.001f || frz > 0.001f) {
+            /* Solo lo que esta EN el agua o pegado a ella. Metiendo aqui todo lo
+               solido de la escena, un barco y un palmeral entero pasaban a partir
+               cortinas: cada objeto multiplicaba una cascada por dieciseis y el
+               editor se llenaba de laminas transparentes solapadas. Se mira si hay
+               agua bajo su huella; si esta todo seco, no es cosa del agua. */
+            int mojado = 0;
+            for (int sx = -1; sx <= 1 && !mojado; sx++)
+                for (int sz = -1; sz <= 1 && !mojado; sz++)
+                    if (g3d_waterfield_depth_at(fcx + frx * sx, fcz + frz * sz) > 0.01f)
+                        mojado = 1;
+            if (mojado && (frx > 0.001f || frz > 0.001f)) {
                 float *fb = &fboxes[nfboxes * 6];
                 fb[0] = fcx - frx * fcore; fb[1] = mn[1]; fb[2] = fcz - frz * fcore;
                 fb[3] = fcx + frx * fcore; fb[4] = mx[1]; fb[5] = fcz + frz * fcore;
@@ -265,7 +275,25 @@ static void spl_obstacles(float dt) {
     }
 
     g3d_waterfield_set_obstacles(nboxes ? boxes : NULL, nboxes);
-    g3d_water_falls_set_obstacles(nfboxes ? fboxes : NULL, nfboxes);
+    /* APAGADO: partir la cortina se ve PEOR que no partirla.
+     *
+     * La geometria es correcta -- el test comprueba que cada tira sale en dos
+     * trozos con su hueco -- pero visualmente no vale: una escena asentada tiene
+     * del orden de veinte cortinas, y partir cada una en cuatro tiras por dos
+     * trozos las deja en ciento sesenta laminas SEMITRANSPARENTES que se solapan
+     * unas con otras. El resultado es una niebla lechosa que tapa medio mapa, y
+     * eso es mucho peor que el agua atravesando una piedra.
+     *
+     * El problema no es el recorte sino el medio: mientras la cascada sea un
+     * puñado de quads transparentes, multiplicarlos por ocho arruina la imagen
+     * pase lo que pase. Partirla pide otra representacion -- una malla continua
+     * deformada alrededor de la roca, o hacerlo en el shader descartando los
+     * pixeles tapados, que no anade ni una lamina.
+     *
+     * Se deja la lista vacia en vez de quitar el codigo: g3d_water_falls_set_
+     * obstacles y su prueba siguen ahi para cuando se aborde de la otra forma. */
+    (void)fboxes; (void)nfboxes;
+    g3d_water_falls_set_obstacles(NULL, 0);
 }
 
 /* --------------------------------------------------------------------------- */
