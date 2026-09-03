@@ -65,7 +65,8 @@ static struct {
     float thick;                  /* grosor del chorro: una celda del campo */
     unsigned int built_obst_rev;  /* the set the geometry reflects */
     int   splits;                 /* curtains parted last build */
-} F = { .threshold = 1.5f, .foam = 1.0f, .mist = 1.0f };
+    int   curtains;               /* draw the quad sheets (off: the mesh does) */
+} F = { .threshold = 1.5f, .foam = 1.0f, .mist = 1.0f, .curtains = 0 };
 
 static char *falls_src(const char *body, int frag) {
     const G3DGLCaps *c = g3d_glcaps();
@@ -432,7 +433,9 @@ static void falls_build(void) {
     free(used);
     #undef WF_MAX_CHAIN
 
-    if (nv > 0) {
+    /* No point uploading sheets nobody draws: with the curtains off this build
+       only exists for the feet and the counts, which are CPU-side. */
+    if (nv > 0 && F.curtains) {
         if (!F.vao) glGenVertexArrays(1, &F.vao);
         if (!F.vbo) glGenBuffers(1, &F.vbo);
         glBindVertexArray(F.vao);
@@ -461,6 +464,15 @@ static void falls_build(void) {
 
 void g3d_water_falls_render(G3DCamera *camera, int flip_y) {
     if (!camera || F.failed || !g3d_waterfield_active()) return;
+
+    /* The analysis runs whatever happens: the spray at the feet comes off this
+       same build, and so does everything that asks how many falls there are.
+       Only the DRAWING is optional now that the water surface hangs its own
+       curtain -- one mesh means one blend, where these quads meant a separate
+       semi-transparent sheet per cell, seventy of them in a settled scene, each
+       blending over the one behind into a milky haze. */
+    falls_build_if_needed();
+    if (!F.curtains || F.sheets <= 0) return;
 
     if (!F.inited) {
         char *v = falls_src(g3d_water_glsl_fall_vert, 0);
@@ -528,6 +540,16 @@ void g3d_water_falls_set_threshold(float drop) {
     F.field_rev = 0;              /* force a rebuild */
 }
 
+void g3d_water_falls_set_curtains(int on) {
+    on = on ? 1 : 0;
+    if (on == F.curtains) return;
+    F.curtains = on;
+    /* Turning them back on has to rebuild: while they were off the build kept
+       running for the feet but never uploaded a vertex, so the buffer holds
+       whatever it held before. */
+    F.field_rev = 0;
+}
+
 void g3d_water_falls_set_style(float foam, float mist) {
     F.foam = foam < 0.0f ? 0.0f : foam;
     F.mist = mist < 0.0f ? 0.0f : mist;
@@ -568,6 +590,7 @@ void g3d_water_falls_shutdown(void) {
 
 void g3d_water_falls_render(G3DCamera *c, int f) { (void)c; (void)f; }
 void g3d_water_falls_set_threshold(float d) { (void)d; }
+void g3d_water_falls_set_curtains(int on) { (void)on; }
 void g3d_water_falls_set_style(float f, float m) { (void)f; (void)m; }
 int  g3d_water_falls_count(void) { return 0; }
 int  g3d_water_falls_split_count(void) { return 0; }

@@ -26,11 +26,27 @@ extern "C" {
 void g3d_water_falls_render(G3DCamera *camera, int flip_y);
 
 /* Smallest drop that counts as a fall rather than a slope, in world units
-   (default 1.5). Raise it if gentle rapids are sprouting curtains. */
+   (default 1.5). Raise it if gentle rapids are sprouting curtains.
+   This governs the ANALYSIS -- where the falls are and where they land -- while
+   the water surface decides what to DRAW from its own thresholds
+   (`g3d_water_render_set_falls`). The defaults are deliberately the same drop
+   and the same one-in-one slope: move one and the spray starts landing where no
+   curtain is falling. */
 void g3d_water_falls_set_threshold(float drop);
 
 /* Foam and landing-mist intensity (both default 1). */
 void g3d_water_falls_set_style(float foam, float mist);
+
+/* Draw the quad curtains, off by default.
+   The water SURFACE now hangs the falling water itself, as part of the same
+   tessellated mesh: one mesh, one blend, and the join from river to fall to
+   pool cannot show a seam because there is nothing to join. These quads were
+   one semi-transparent sheet per cell -- a settled scene builds about seventy,
+   each blending over the one behind -- and anything they had to be drawn around
+   multiplied them again. What survives here is the ANALYSIS, which still says
+   where the falls are and where they land; that is where the spray comes from.
+   Switch them on only to compare the two. */
+void g3d_water_falls_set_curtains(int on);
 
 /* Where the falls LAND. Fills `out` with up to `max` entries of
    { x, y, z, fall_height, width } and returns how many. This is what the spray

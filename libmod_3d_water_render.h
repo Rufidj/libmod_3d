@@ -39,6 +39,16 @@ void g3d_water_render_set_optics(float ar, float ag, float ab,
    it (0 = no refraction). */
 void g3d_water_render_set_detail(float foam, float refraction);
 
+/* Falling water. Where the water SURFACE itself drops steeply, this same mesh
+   stops being a surface and becomes the curtain of a waterfall: no waves, faces
+   downhill, streaks that accelerate as they fall and foam that keeps building
+   all the way to the bottom.
+   `slope` is the drop per unit of ground that counts as falling (1 = 45
+   degrees; it must be a SLOPE and not a height, or on fine cells every hillside
+   sprouts a curtain), `drop` the smallest whole fall worth drawing, and
+   `foam`/`mist` the look at the foot. `slope` huge turns the whole thing off. */
+void g3d_water_render_set_falls(float slope, float drop, float foam, float mist);
+
 /* Caustics: the net of light the surface casts on everything beneath it.
    0 disables the pass entirely; 1 is the default strength. */
 void g3d_water_render_set_caustics(float strength);

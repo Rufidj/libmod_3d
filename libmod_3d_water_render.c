@@ -103,6 +103,11 @@ static struct {
     float surf_amount, surf_freq, surf_speed, surf_runup;
     float surf_height, surf_dir_x, surf_dir_z;
 
+    /* Falling water, drawn by this same mesh. */
+    float fall_slope;        /* level drop per unit that counts as falling */
+    float fall_drop;         /* smallest whole drop worth a curtain        */
+    float fall_foam, fall_mist;
+
     /* Persistent foam: two R16F fields, ping-ponged by a compute pass. */
     G3DShaderProgram *foam_prog;
     int   foam_failed;
@@ -127,6 +132,11 @@ static struct {
     .rough = 0.06f, .opacity = 1.0f, .foam = 0.55f, .refract = 1.0f,
     .sea_extent = 4.0f,
     .foam_decay = 0.22f, .foam_max_cover = 0.78f,
+    /* One in one: a slope of 1 is 45 degrees, well past what a river bed does
+       and short of nothing but a real ledge. A fixed DROP would not do -- 0.3
+       units is seven degrees on the editor's 2.5-unit cells, and every ordinary
+       hillside would come out draped in curtains. */
+    .fall_slope = 1.0f, .fall_drop = 1.5f, .fall_foam = 1.0f, .fall_mist = 1.0f,
 };
 
 /* --------------------------------------------------------------------------
@@ -835,6 +845,17 @@ void g3d_water_render(G3DCamera *camera, int flip_y) {
                         vec4_make(-fsize * 0.5f, -fsize * 0.5f, fsize, fsize));
     g3d_shader_set_float(sh, "uSeaLevel", sea);
 
+    {   /* Falling water. The cell size is the natural step for walking the
+           field: anything shorter just resamples the same bilinear ramp. */
+        int fside = g3d_waterfield_side();
+        float cell = (fside > 1) ? fsize / (float)(fside - 1) : 1.0f;
+        g3d_shader_set_float(sh, "uFieldCell", cell);
+        g3d_shader_set_float(sh, "uFallSlope", R.fall_slope);
+        g3d_shader_set_float(sh, "uFallDrop", R.fall_drop);
+        g3d_shader_set_float(sh, "uFallFoam", R.fall_foam);
+        g3d_shader_set_float(sh, "uFallMist", R.fall_mist);
+    }
+
     g3d_shader_set_vec3(sh, "uAbsorption", vec3_make(R.absorb[0], R.absorb[1], R.absorb[2]));
     g3d_shader_set_vec3(sh, "uScatterColor", vec3_make(R.scatter[0], R.scatter[1], R.scatter[2]));
     g3d_shader_set_float(sh, "uRoughness", R.rough);
@@ -955,8 +976,10 @@ void g3d_water_render(G3DCamera *camera, int flip_y) {
     glDepthMask(GL_TRUE);
     glActiveTexture(GL_TEXTURE0);
 
-    /* Falling water goes on top of the surface it fell from, so it has to come
-       after: the sheet is transparent and must blend over the pool below. */
+    /* The surface mesh above already drew the falls, so this normally only
+       refreshes the analysis the spray at their feet is placed from. It still
+       draws the old quad curtains when they are switched back on, which is the
+       only way to compare the two side by side. */
     g3d_water_falls_render(camera, flip_y);
 
     /* Caustics last: they light the sea bed, which is already on screen. */
@@ -1023,6 +1046,13 @@ void g3d_water_render_set_underwater(float visibility, float shafts) {
     R.under_shafts = shafts < 0.0f ? 0.0f : shafts;
 }
 
+void g3d_water_render_set_falls(float slope, float drop, float foam, float mist) {
+    R.fall_slope = slope > 0.05f ? slope : 0.05f;
+    R.fall_drop  = drop  > 0.05f ? drop  : 0.05f;
+    R.fall_foam  = foam < 0.0f ? 0.0f : foam;
+    R.fall_mist  = mist < 0.0f ? 0.0f : mist;
+}
+
 void g3d_water_render_set_caustics(float strength) {
     R.caustics = strength < 0.0f ? 0.0f : strength;
 }
@@ -1069,6 +1099,9 @@ void g3d_water_render_set_optics(float ar, float ag, float ab, float sr, float s
     (void)ar; (void)ag; (void)ab; (void)sr; (void)sg; (void)sb; (void)r; (void)o;
 }
 void g3d_water_render_set_detail(float f, float r) { (void)f; (void)r; }
+void g3d_water_render_set_falls(float s, float d, float f, float m) {
+    (void)s; (void)d; (void)f; (void)m;
+}
 void g3d_water_render_force_tessellation(int m) { (void)m; }
 void g3d_water_render_set_sea_extent(float m) { (void)m; }
 void g3d_water_render_shutdown(void) {}

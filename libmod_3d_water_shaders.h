@@ -125,6 +125,107 @@ static const char *g3d_water_glsl_common =
     "    return texture(uFieldTex, uv);\n"
     "}\n"
     "\n"
+    /* ---- Falling water ------------------------------------------------
+       A waterfall used to be a separate pass: quads hung over the drop, one
+       per cell, each blending over the one behind it. Seventy of them in a
+       settled scene, and anything that had to be drawn around multiplied them
+       again -- which is how a cliff with a rock on it turned into milk.
+       Now the SURFACE MESH goes over the edge itself. Where the water surface
+       drops steeply the same tessellated grid stops behaving like a surface:
+       it drops the waves, turns to face downhill, stands clear of the rock and
+       is shaded as a curtain. One mesh, one blend, and the join from river to
+       fall to pool cannot show a seam because there is nothing to join.
+       The tessellation control stage gives those patches their subdivision in
+       proportion to the DROP, so the sheet has real geometry down its length
+       rather than two stretched triangles. */
+    "uniform float uFieldCell;\n"    /* world units between field cells        */
+    "uniform float uFallSlope;\n"    /* level drop per unit that counts as fall */
+    "uniform float uFallDrop;\n"     /* smallest total drop worth a curtain    */
+    "\n"
+    /* The field AT THE CELL, not between cells.
+       Everything else samples this texture bilinearly, which is right for a
+       surface but poison for a decision: halfway between a lake and the bank
+       behind it the interpolation invents metres of water climbing the slope,
+       and a detector that believes it hangs a curtain down every shoreline
+       that has high ground behind it. Reading the texel centre asks the
+       simulation what is there instead of asking its interpolation. */
+    "vec4 waterSampleCell(vec2 p) {\n"
+    "    vec2 uv = waterFieldUV(p);\n"
+    "    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))))\n"
+    "        return waterSampleField(p);\n"
+    "    vec2 ts = 1.0 / vec2(textureSize(uFieldTex, 0));\n"
+    "    return texture(uFieldTex, (floor(uv / ts) + 0.5) * ts);\n"
+    "}\n"
+    "\n"
+    /* Water level at p, or `here` where p is DRY. A dry cell stores the GROUND
+       height, not a water level, so a gradient taken against one measures the
+       bank rather than the water -- which beside any shore with relief reads as
+       a huge drop and would drape the hillside in curtains. */
+    "float waterWetLevel(vec2 p, float here) {\n"
+    "    vec4 f = waterSampleCell(p);\n"
+    "    return f.y > 0.0 ? f.x : here;\n"
+    "}\n"
+    "\n"
+    /* Gradient of the water SURFACE: .xy points uphill, .z is the slope. */
+    "vec3 waterLevelSlope(vec2 p, float here) {\n"
+    "    float e = max(uFieldCell, 0.05);\n"
+    "    float gx = waterWetLevel(p + vec2(e, 0.0), here)\n"
+    "             - waterWetLevel(p - vec2(e, 0.0), here);\n"
+    "    float gz = waterWetLevel(p + vec2(0.0, e), here)\n"
+    "             - waterWetLevel(p - vec2(0.0, e), here);\n"
+    "    vec2 g = vec2(gx, gz) / (2.0 * e);\n"
+    "    return vec3(g, length(g));\n"
+    "}\n"
+    "\n"
+    /* How much the water at p is FALLING rather than flowing, 0..1, plus the
+       cascade it belongs to.
+       The walk up finds the ledge it left and the walk down from there finds
+       where it lands, so every point of one cascade gets the SAME top and
+       bottom. That is what lets foam keep building and streaks keep
+       accelerating over the whole drop: measured per cell instead, each cell
+       restarts its own 0..1 ramp and a tall fall reads as a staircase.
+       `slope` comes back too, because how far the sheet has to stand off the
+       rock depends on how steep the rock is. */
+    "float waterFallAt(vec2 p, float level, out vec2 dir, out float top,\n"
+    "                  out float bot, out float slope) {\n"
+    "    dir = vec2(0.0); top = level; bot = level; slope = 0.0;\n"
+    "    vec3 s = waterLevelSlope(p, level);\n"
+    "    if (s.z < uFallSlope * 0.5) return 0.0;\n"
+    "    slope = s.z;\n"
+    "    dir = -s.xy / max(s.z, 1.0e-4);\n"
+    "    float st = max(uFieldCell, 0.05);\n"
+    "\n"
+    "    vec2 q = p; float ql = level;\n"
+    "    for (int i = 0; i < 8; i++) {\n"
+    "        vec3 gs = waterLevelSlope(q, ql);\n"
+    "        if (gs.z < uFallSlope * 0.5) break;\n"
+    "        vec2 nq = q + (gs.xy / max(gs.z, 1.0e-4)) * st;\n"
+    "        vec4 nf = waterSampleCell(nq);\n"
+    "        if (nf.y <= 0.0 || nf.x < ql) break;\n"   /* left the water, or stopped climbing */
+    "        q = nq; ql = nf.x;\n"
+    "    }\n"
+    "    top = ql;\n"
+    "\n"
+    /* And DOWN to where it lands -- from p, NOT from the ledge just found. The
+       ledge is the last place the surface is still flat, so a descent starting
+       there breaks on its very first test and every fall comes out zero units
+       tall. That silently switched the whole effect off. */
+    "    vec2 r = p; float rl = level;\n"
+    "    for (int i = 0; i < 12; i++) {\n"
+    "        vec3 gs = waterLevelSlope(r, rl);\n"
+    "        if (gs.z < uFallSlope * 0.5) break;\n"
+    "        vec2 nr = r - (gs.xy / max(gs.z, 1.0e-4)) * st;\n"
+    "        vec4 nf = waterSampleCell(nr);\n"
+    "        if (nf.y <= 0.0 || nf.x > rl) break;\n"
+    "        r = nr; rl = nf.x;\n"
+    "    }\n"
+    "    bot = rl;\n"
+    "\n"
+    "    float steep = smoothstep(uFallSlope, uFallSlope * 2.5, s.z);\n"
+    "    float tall  = smoothstep(uFallDrop * 0.5, uFallDrop, top - bot);\n"
+    "    return steep * tall;\n"
+    "}\n"
+    "\n"
     /* Sum of Gerstner waves. Returns the displacement in .xyz; the caller adds
        it to the flat surface point. `scale` fades the whole thing out in shallow
        water so waves do not punch through the shore. Tier 0/1 use this as the
@@ -318,6 +419,11 @@ static const char *g3d_water_glsl_vert =
     "out vec2  vFlow;\n"
     "out float vCrest;\n"
     "out float vFold;\n"
+    "out float vBaseY;\n"    /* nivel del agua antes de las olas             */
+    "out float vFall;\n"     /* 0..1 how much this point is falling water   */
+    "out float vFallV;\n"    /* where it is down the WHOLE cascade, 0..1    */
+    "out float vFallH;\n"    /* total height of that cascade                */
+    "out vec2  vFallDir;\n"  /* which way it is going down                  */
     "void main() {\n"
     "    vec4 f = waterSampleField(position.xz);\n"
     "    vDepth = f.y;\n"
@@ -327,8 +433,24 @@ static const char *g3d_water_glsl_vert =
     "    float shoal = clamp(f.y / 1.5, 0.0, 1.0);\n"
     "    vec3 nrm; float crest;\n"
     "    vec3 disp = waterSurface(position.xz, shoal, nrm, crest, vFold);\n"
-    "    vec3 wp = vec3(position.x, f.x, position.z) + disp;\n"
-    "    vNormal = nrm;\n"
+    "    vBaseY = f.x;\n"
+    "    vec2 fdir; float ftop, fbot, fslope;\n"
+    "    vFall = waterFallAt(position.xz, f.x, fdir, ftop, fbot, fslope);\n"
+    "    vFallH = max(ftop - fbot, 0.0);\n"
+    "    vFallV = (vFallH > 0.001) ? clamp((ftop - f.x) / vFallH, 0.0, 1.0) : 0.0;\n"
+    "    vFallDir = fdir;\n"
+    /* Stand the sheet a little clear of the rock. Do NOT try to hang it
+       vertically from the lip instead: the terrain is a height field too, so
+       the cliff is the same one-cell ramp the water is on, and a vertical
+       curtain dropped from the ledge goes straight INSIDE the hillside and
+       disappears. Stepping downhill by clearance/slope lifts the sheet off the
+       face by a fixed distance whatever the angle, which is all it needs. */
+    "    vec2 pw = position.xz + fdir * (vFall * 0.15 / max(fslope, 0.5));\n"
+    "    vec3 wp = vec3(pw.x, f.x, pw.y) + disp * (1.0 - vFall);\n"
+    /* Falling water faces DOWNHILL, not up: shading it with the wave normal
+       lights a vertical sheet as if it were a pond. */
+    "    vec3 fnrm = normalize(vec3(fdir.x * fslope, 1.0, fdir.y * fslope));\n"
+    "    vNormal = normalize(mix(nrm, fnrm, vFall));\n"
     "    vCrest = crest;\n"
     "    vWorldPos = wp;\n"
     "    gl_Position = uProjection * uView * vec4(wp, 1.0);\n"
@@ -351,7 +473,20 @@ static const char *g3d_water_glsl_tcs =
     "    vec2 mid = (a + b) * 0.5;\n"
     "    float d = distance(uCameraPos.xz, mid);\n"
     "    float t = clamp((d - uTessNear) / max(uTessFar - uTessNear, 1.0), 0.0, 1.0);\n"
-    "    return mix(uTessMax, 1.0, t * t);\n"
+    "    float lvl = mix(uTessMax, 1.0, t * t);\n"
+    /* A falling sheet needs its subdivision in the VERTICAL, and how much it
+       needs has nothing to do with how far away it is: one patch can span a
+       thirty-unit cliff, and the distance rule would hand that drop two
+       stretched triangles. Ask for roughly one row of vertices per half unit
+       of fall instead. Both patches sharing this edge measure the same two
+       endpoints, so the seam still matches and no crack opens. */
+    "    vec4 fa = waterSampleCell(a);\n"
+    "    vec4 fb = waterSampleCell(b);\n"
+    "    if (fa.y > 0.0 && fb.y > 0.0) {\n"
+    "        float drop = abs(fa.x - fb.x);\n"
+    "        lvl = max(lvl, clamp(drop / 0.5, 1.0, 48.0));\n"
+    "    }\n"
+    "    return lvl;\n"
     "}\n"
     "\n"
     "void main() {\n"
@@ -405,6 +540,11 @@ static const char *g3d_water_glsl_tes =
     "out vec2  vFlow;\n"
     "out float vCrest;\n"
     "out float vFold;\n"
+    "out float vBaseY;\n"
+    "out float vFall;\n"
+    "out float vFallV;\n"
+    "out float vFallH;\n"
+    "out vec2  vFallDir;\n"
     "\n"
     "void main() {\n"
     "    vec2 a = mix(teWorldXZ[0], teWorldXZ[1], gl_TessCoord.x);\n"
@@ -417,8 +557,19 @@ static const char *g3d_water_glsl_tes =
     "    float shoal = clamp(f.y / 1.5, 0.0, 1.0);\n"
     "    vec3 nrm; float crest;\n"
     "    vec3 disp = waterSurface(p, shoal, nrm, crest, vFold);\n"
-    "    vec3 wp = vec3(p.x, f.x, p.y) + disp;\n"
-    "    vNormal = nrm;\n"
+    /* Where the water is falling this is not a surface any more but a curtain:
+       it stands clear of the rock, it carries no waves, and it faces downhill.
+       See the vertex stage for why it is not hung vertically from the lip. */
+    "    vBaseY = f.x;\n"
+    "    vec2 fdir; float ftop, fbot, fslope;\n"
+    "    vFall = waterFallAt(p, f.x, fdir, ftop, fbot, fslope);\n"
+    "    vFallH = max(ftop - fbot, 0.0);\n"
+    "    vFallV = (vFallH > 0.001) ? clamp((ftop - f.x) / vFallH, 0.0, 1.0) : 0.0;\n"
+    "    vFallDir = fdir;\n"
+    "    vec2 pw = p + fdir * (vFall * 0.15 / max(fslope, 0.5));\n"
+    "    vec3 wp = vec3(pw.x, f.x, pw.y) + disp * (1.0 - vFall);\n"
+    "    vec3 fnrm = normalize(vec3(fdir.x * fslope, 1.0, fdir.y * fslope));\n"
+    "    vNormal = normalize(mix(nrm, fnrm, vFall));\n"
     "    vCrest = crest;\n"
     "    vWorldPos = wp;\n"
     "    gl_Position = uProjection * uView * vec4(wp, 1.0);\n"
@@ -436,6 +587,11 @@ static const char *g3d_water_glsl_frag =
     "in vec2  vFlow;\n"
     "in float vCrest;\n"
     "in float vFold;\n"
+    "in float vBaseY;\n"
+    "in float vFall;\n"
+    "in float vFallV;\n"
+    "in float vFallH;\n"
+    "in vec2  vFallDir;\n"
     "out vec4 FragColor;\n"
     "\n"
     "uniform vec3  uSunDir;\n"       /* points FROM the surface TO the sun */
@@ -457,6 +613,8 @@ static const char *g3d_water_glsl_frag =
     "uniform float uFoamMaxCover;\n"
     "uniform sampler2D uFoamTex;\n"
     "uniform float uOpacity;\n"
+    "uniform float uFallFoam;\n"     /* aeration down a waterfall */
+    "uniform float uFallMist;\n"     /* the glow where it lands   */
     "\n"
     "uniform int   uFogEnabled;\n"
     "uniform vec3  uFogColor;\n"
@@ -584,6 +742,31 @@ static const char *g3d_water_glsl_frag =
     "void main() {\n"
     /* Dry ground: the field says there is no water here. */
     "    if (vDepth <= 0.0) discard;\n"
+    /* And dry ground the INTERPOLATION invented. A dry cell reports the level
+       of the water beside it, so that the sheet stays flat up to the shore
+       instead of diving into the bank. Where two bodies of water at very
+       different heights are separated by a dry ridge only a cell or two wide --
+       a lake at the foot of a cliff with a stream on the plateau above, which
+       is an ordinary thing to build -- each side of that ridge reports its own
+       water, and the surface stretched between them is pure invention: a wall
+       twenty units tall standing on the rock, or, where the ridge is ragged and
+       one lone cell sides with the lake, a white SPIKE stabbing through the
+       river. There is no level such a cell could report that would not produce
+       one or the other: borrow the far water and you get the wall, keep your own
+       ground and you get a spike the other way. A height field simply cannot
+       hold two waters that close together at that distance apart.
+       So the drawing refuses it instead. */
+    "    vec4 fcell = waterSampleCell(vWorldPos.xz);\n"
+    "    if (fcell.y <= 0.0) discard;\n"
+    /* How far the surface may stray from the water level of the cell it stands
+       over: as much as the water itself falls in one cell, plus a little. That
+       keeps a WATERFALL, whose neighbouring cells really are metres apart, and
+       throws away the bridge, whose neighbours are the same lake. Compared
+       before the waves are added, so a big swell can never punch holes in the
+       sea by being tall. */
+    "    float cellSlope = waterLevelSlope(vWorldPos.xz, fcell.x).z;\n"
+    "    if (abs(vBaseY - fcell.x) > 1.5 + cellSlope * max(uFieldCell, 0.05) * 1.5)\n"
+    "        discard;\n"
     "\n"
     "    vec3 V = normalize(uCameraPos - vWorldPos);\n"
     "    vec2 screenUV = (vClip.xy / vClip.w) * 0.5 + 0.5;\n"
@@ -781,12 +964,11 @@ static const char *g3d_water_glsl_frag =
     "    float alpha = clamp(column / 0.45, 0.0, 1.0);\n"
     "    alpha = max(alpha, F);\n"
     "    alpha = max(alpha, foam);\n"
-    /* Step aside where the water is FALLING. A height field has to represent a
-       cliff as an almost vertical ramp, and the waterfall pass already hangs a
-       proper curtain there; drawing both stacks two transparent surfaces on the
-       same pixels, which washes the colour out and leaves seams where the panels
-       overlap. A very steep water SURFACE is the tell-tale, so fade it out and
-       let the curtain own the drop. */
+    /* Where the water is FALLING this same mesh is the curtain, so it must not
+       fade out -- it used to, because a separate pass hung quads over the drop
+       and two transparent surfaces on the same pixels wash each other out. One
+       mesh needs no such truce; the fade now only applies to steep water we did
+       NOT recognise as a fall. */
     /* Only WET neighbours count. In a dry cell the field texture stores the
        GROUND height, not a water level, so comparing against one measures the
        bank rather than the water -- and beside any shore with relief that reads
@@ -794,7 +976,46 @@ static const char *g3d_water_glsl_frag =
        every pixel is within a couple of units of high dry ground, which made the
        water vanish completely. */
     "    float lg = (abs(fX.x - vWorldPos.y) + abs(fZ.x - vWorldPos.y)) * 0.5;\n"
-    "    alpha *= 1.0 - 0.9 * smoothstep(1.2, 3.5, lg);\n"
+    "    alpha *= 1.0 - 0.9 * smoothstep(1.2, 3.5, lg) * (1.0 - vFall);\n"
+    "\n"
+    /* --- falling water ------------------------------------------------------ */
+    /* The curtain, drawn by the surface itself. Everything here is keyed on the
+       position within the WHOLE cascade, never on this cell: a fall measured
+       per cell restarts its foam ramp and its scroll speed at every step, which
+       is exactly what makes a tall drop read as a staircase. */
+    "    if (vFall > 0.002) {\n"
+    "        float drop = max(vFallH, 0.5);\n"
+    /*     Water accelerates as it falls, so the streaks must too -- a constant
+           scroll speed is the giveaway that reads as a moving texture instead of
+           falling water. Distance under gravity goes as t^2, hence the sqrt. */
+    "        float fspeed = sqrt(2.0 * 9.81 * drop) * 0.25;\n"
+    /*     Across the fall, a WORLD coordinate: the streaks then run continuously
+           over a wide curtain instead of repeating per patch. */
+    "        vec2 across = vec2(-vFallDir.y, vFallDir.x);\n"
+    "        vec2 fuv = vec2(dot(vWorldPos.xz, across),\n"
+    "                        vFallV * drop - uTime * fspeed);\n"
+    "        float s1 = valueNoise(vec2(fuv.x * 1.7, fuv.y * 0.6));\n"
+    "        float s2 = valueNoise(vec2(fuv.x * 3.9, fuv.y * 1.1) + 31.7);\n"
+    "        float streak = s1 * 0.65 + s2 * 0.35;\n"
+    /*     Coherent at the lip, aerated by the time it lands. */
+    "        float breakup = smoothstep(0.15, 1.0, vFallV);\n"
+    "        float ffoam = clamp((streak * 0.55 + 0.25) * breakup * uFallFoam, 0.0, 0.85);\n"
+    "        ffoam = max(ffoam, smoothstep(0.8, 1.0, vFallV) * 0.6 * uFallFoam);\n"
+    "        vec3 flight = uSunColor * 0.75 + uAmbient;\n"
+    "        vec3 fbody = uScatterColor * (0.7 + 0.6 * streak) + flight * 0.18;\n"
+    "        vec3 fcolor = mix(fbody, flight * (0.85 + 0.15 * streak), ffoam);\n"
+    "        float mist = smoothstep(0.82, 1.0, vFallV) * uFallMist;\n"
+    "        fcolor = mix(fcolor, flight * 0.95, mist * 0.6);\n"
+    /*     A single sheet can afford to be nearly opaque. The old quad curtains
+           could not: a tall cascade was several of them deep along the view ray
+           and they stacked into flat white, so their alpha had to be held down
+           to 0.72 and the water looked like gauze. */
+    "        float falpha = clamp(mix(0.42, 0.92, breakup) * (0.8 + 0.3 * streak),\n"
+    "                             0.0, 1.0);\n"
+    "        falpha = max(falpha, ffoam);\n"
+    "        color = mix(color, fcolor, vFall);\n"
+    "        alpha = mix(alpha, falpha, vFall);\n"
+    "    }\n"
     "    alpha *= uOpacity;\n"
     "    if (uHasScene == 0) alpha = max(alpha, 0.7);\n"
     "\n"
@@ -1066,8 +1287,9 @@ static const char *g3d_water_glsl_swash_frag =
     "    if (f.y > 0.02) discard;\n"          /* already under water */
     "\n"
     /* La espuma se posa en el SUELO. Sin esto se pinta igual en la corteza de un
-       arbol o en un sprite (que es un plano vertical). La normal se saca de la
-       profundidad, que es lo unico que hay aqui. */
+       arbol o en un sprite (que es un plano vertical), que era justo lo que se
+       veia: brillos de agua encima de todo lo que estuviera a la altura de la
+       orilla. La normal se saca de la profundidad, que es lo unico que hay aqui. */
     "    vec3 nrm = normalize(cross(dFdx(P), dFdy(P)));\n"
     "    if (abs(nrm.y) < 0.55) discard;\n"
     "\n"
@@ -1093,7 +1315,6 @@ static const char *g3d_water_glsl_swash_frag =
     "        near = max(near, waterSampleField(P.xz + dir * 11.0).y);\n"
     "    }\n"
     "    if (near <= 0.02) discard;\n"       /* no hay agua cerca: aqui no llega */
-    "    // sin acotar\n"
     "\n"
     "    float still = (uSeaLevel > -1.0e29) ? uSeaLevel : f.x;\n"
     "    float above = P.y - still;\n"
