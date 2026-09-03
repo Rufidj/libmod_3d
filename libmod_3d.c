@@ -2462,6 +2462,15 @@ int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params) {
                                 *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
 }
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params) { g3d_collider_clear(); return 1; }
+/* ---- Deshacer una escena para montar otra ----
+   Estas cuatro existian en C pero no estaban en la lista de BennuGD2, asi que un
+   juego que cambia de mapa no podia soltar la vegetacion, las zonas pintadas, los
+   manantiales ni los personajes de la anterior: se quedaban puestos encima de la
+   nueva. */
+int64_t g3d_scatter_clear_bgd(INSTANCE *my, int64_t *params) { g3d_scatter_clear(); return 1; }
+int64_t g3d_zone_clear_bgd(INSTANCE *my, int64_t *params) { g3d_zone_clear(); return 1; }
+int64_t g3d_watersim_clear_sources_bgd(INSTANCE *my, int64_t *params) { g3d_watersim_clear_sources(); return 1; }
+int64_t g3d_char_clear_all_bgd(INSTANCE *my, int64_t *params) { g3d_char_clear_all(); return 1; }
 
 /* ---- raycast vehicle ---- */
 int64_t g3d_vehicle_create_bgd(INSTANCE *my, int64_t *params) {

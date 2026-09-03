@@ -401,6 +401,10 @@ int64_t g3d_physics_set_gravity_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_safe_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_scatter_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_zone_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_watersim_clear_sources_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_char_clear_all_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_destroy_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_vehicle_update_bgd(INSTANCE *my, int64_t *params);
@@ -569,6 +573,11 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_COLLIDER_ADD_BOX", "FFFFFF", TYPE_INT, g3d_collider_add_box_bgd),
     FUNC("G3D_CAMERA_SAFE_DISTANCE", "FFFFFFFF", TYPE_FLOAT, g3d_camera_safe_distance_bgd),
     FUNC("G3D_COLLIDER_CLEAR", "", TYPE_INT, g3d_collider_clear_bgd),
+    /* deshacer lo de una escena antes de montar la siguiente */
+    FUNC("G3D_SCATTER_CLEAR", "", TYPE_INT, g3d_scatter_clear_bgd),
+    FUNC("G3D_ZONE_CLEAR", "", TYPE_INT, g3d_zone_clear_bgd),
+    FUNC("G3D_WATERSIM_CLEAR_SOURCES", "", TYPE_INT, g3d_watersim_clear_sources_bgd),
+    FUNC("G3D_CHAR_CLEAR_ALL", "", TYPE_INT, g3d_char_clear_all_bgd),
     FUNC("G3D_COLLIDER_SET_BOX", "IFFFFFF", TYPE_INT, g3d_collider_set_box_bgd),
     FUNC("G3D_COLLIDER_REMOVE_BOX", "I", TYPE_INT, g3d_collider_remove_box_bgd),
     FUNC("G3D_VEHICLE_CREATE", "FFFF", TYPE_INT, g3d_vehicle_create_bgd),
