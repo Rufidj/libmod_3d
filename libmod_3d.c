@@ -43,6 +43,7 @@
 #include "libmod_3d_pick.h"
 #include "libmod_3d_paint.h"
 #include "libmod_3d_cloth.h"
+#include "libmod_3d_sprite.h"
 
 #include <SDL.h>
 #include "SDL_gpu.h"
@@ -107,7 +108,13 @@ enum {
     LOC3D_BLEND_SRC_ALPHA,
     LOC3D_BLEND_DST_ALPHA,
     LOC3D_BLEND_EQ_RGB,
-    LOC3D_BLEND_EQ_ALPHA
+    LOC3D_BLEND_EQ_ALPHA,
+    LOC3D_FILE,
+    LOC3D_GRAPH,
+    LOC3D_FLAGS,
+    LOC3D_SPR_COLS,
+    LOC3D_SPR_ROWS,
+    LOC3D_SPR_FRAME
 };
 
 DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
@@ -155,6 +162,17 @@ DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
     { "custom_blendmode.dst_alpha"     , NULL, -1, -1 },
     { "custom_blendmode.equation_rgb"  , NULL, -1, -1 },
     { "custom_blendmode.equation_alpha", NULL, -1, -1 },
+    /* Un sprite 3D se maneja con los locales de siempre: 'file' y 'graph' eligen
+       el grafico (animar = cambiar graph) y 'flags' el espejo. */
+    { "file"      , NULL, -1, -1 },
+    { "graph"     , NULL, -1, -1 },
+    { "flags"     , NULL, -1, -1 },
+    /* Hoja de sprites: un solo grafico partido en celdas (cols x filas) del que
+       se dibuja el fotograma 'sprite.frame'. Con 0 columnas se usa el grafico
+       entero, que es el caso del FPG. */
+    { "sprite.cols" , NULL, -1, -1 },
+    { "sprite.rows" , NULL, -1, -1 },
+    { "sprite.frame", NULL, -1, -1 },
     { NULL        , NULL, -1, -1 }
 };
 
@@ -1531,6 +1549,81 @@ int64_t g3d_fire_clear_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_collider_set_box_bgd(INSTANCE *my, int64_t *params) {
+    g3d_collider_set_box((int)params[0], *(float *)&params[1], *(float *)&params[2],
+                         *(float *)&params[3], *(float *)&params[4],
+                         *(float *)&params[5], *(float *)&params[6]);
+    return 1;
+}
+int64_t g3d_collider_remove_box_bgd(INSTANCE *my, int64_t *params) {
+    g3d_collider_remove_box((int)params[0]);
+    return 1;
+}
+
+/* ---- Sprites 2D dentro del mundo 3D (personajes estilo HD-2D) -------------
+   El sprite se dibuja solo (pase opaco con recorte alfa); lo que hace el
+   proceso de BennuGD2 es lo de siempre: poner x/y/z, angle, size, alpha y
+   sobre todo file/graph, que son los que eligen el fotograma. */
+int64_t g3d_sprite_create_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
+    return g3d_sprite_create((int)params[0], *(float *)&params[1],
+                             *(float *)&params[2], *(float *)&params[3]);
+}
+int64_t g3d_sprite_destroy_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_destroy((int)params[0]);
+    return 1;
+}
+int64_t g3d_sprite_set_height_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_height((int)params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_ppu_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_pixels_per_unit((int)params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_anchor_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_anchor((int)params[0], *(float *)&params[1], *(float *)&params[2]);
+    return 1;
+}
+int64_t g3d_sprite_set_billboard_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_billboard((int)params[0], (int)params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_cutout_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_cutout((int)params[0], *(float *)&params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_shadow_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_shadow((int)params[0], (int)params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_smooth_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_smooth((int)params[0], (int)params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_lit_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_lit((int)params[0], (int)params[1]);
+    return 1;
+}
+int64_t g3d_sprite_set_snap_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_snap((int)params[0], (int)params[1]);
+    return 1;
+}
+/* Recorte a mano dentro del grafico, para hojas irregulares (el editor saca
+   estas medidas al detectar los fotogramas). */
+int64_t g3d_sprite_set_cell_bgd(INSTANCE *my, int64_t *params) {
+    g3d_sprite_set_cell((int)params[0], (int)params[1], (int)params[2],
+                        (int)params[3], (int)params[4]);
+    return 1;
+}
+/* Postura que toca dibujar (0 = de frente a la camara). El angulo va en
+   milesimas de grado, como el local 'angle'. */
+int64_t g3d_sprite_dir_bgd(INSTANCE *my, int64_t *params) {
+    float ang = G3D_MD2RAD(*(float *)&params[1]);
+    return g3d_sprite_direction((int)params[0], ang, (int)params[2],
+                                g3d_renderer_get_camera());
+}
+
 /* Water */
 int64_t g3d_water_create_bgd(INSTANCE *my, int64_t *params) {
     float level = *(float *)&params[0];
@@ -2574,6 +2667,48 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
                     (int) LOCINT64( libmod_3d, i, LOC3D_BLEND_DST_ALPHA ),
                     (int) LOCINT64( libmod_3d, i, LOC3D_BLEND_EQ_RGB ),
                     (int) LOCINT64( libmod_3d, i, LOC3D_BLEND_EQ_ALPHA ) );
+            break;
+        }
+        case 6: { /* C3D_SPRITE: un grafico 2D de BennuGD2 plantado en el mundo 3D */
+            g3d_sprite_set_position( entity_id, px, py, pz );
+            g3d_sprite_set_scale( entity_id, fsy );      /* el local 'size' */
+            g3d_sprite_set_tint( entity_id,
+                                 LOCBYTE( libmod_3d, i, LOC3D_COLORR ) / 255.0f,
+                                 LOCBYTE( libmod_3d, i, LOC3D_COLORG ) / 255.0f,
+                                 LOCBYTE( libmod_3d, i, LOC3D_COLORB ) / 255.0f,
+                                 LOCBYTE( libmod_3d, i, LOC3D_ALPHA ) / 255.0f );
+            g3d_sprite_set_flip( entity_id, ( LOCINT64( libmod_3d, i, LOC3D_FLAGS ) & 1 ) ? 1 : 0 );
+
+            g3d_sprite_set_grid( entity_id,
+                                 (int) LOCINT64( libmod_3d, i, LOC3D_SPR_COLS ),
+                                 (int) LOCINT64( libmod_3d, i, LOC3D_SPR_ROWS ) );
+            g3d_sprite_set_frame( entity_id, (int) LOCINT64( libmod_3d, i, LOC3D_SPR_FRAME ) );
+
+            /* El grafico manda, igual que en 2D: se coge el GRAPH ya cargado por
+               BennuGD2 (fpg_load/map_load) y se usa SU MISMA textura de OpenGL,
+               sin cargar nada dos veces. Cambiar 'graph' = cambiar de fotograma. */
+            int64_t gfile  = LOCINT64( libmod_3d, i, LOC3D_FILE );
+            int64_t ggraph = LOCINT64( libmod_3d, i, LOC3D_GRAPH );
+            if ( ggraph ) {
+                GRAPH * gr = bitmap_get( gfile, ggraph );
+                if ( gr && gr->tex ) {
+                    /* La textura puede ser mayor que el grafico (relleno a
+                       potencia de dos), asi que el recorte va en proporcion. */
+                    float uw = gr->tex->texture_w ? (float)gr->tex->w / (float)gr->tex->texture_w : 1.0f;
+                    float vh = gr->tex->texture_h ? (float)gr->tex->h / (float)gr->tex->texture_h : 1.0f;
+                    g3d_sprite_set_texture( entity_id,
+                                            (unsigned int) GPU_GetTextureHandle( gr->tex ),
+                                            (int) gr->width, (int) gr->height, uw, vh );
+                    /* El punto de control 0 (center_set) es el que se planta en
+                       x,y,z: si lo pones en los pies, el personaje se apoya en el
+                       suelo. Sin el, centro-abajo. */
+                    if ( gr->ncpoints > 0 && gr->cpoints &&
+                         gr->cpoints[0].x != CPOINT_UNDEFINED && gr->width && gr->height )
+                        g3d_sprite_set_anchor( entity_id,
+                                               (float) gr->cpoints[0].x / (float) gr->width,
+                                               (float) gr->cpoints[0].y / (float) gr->height );
+                }
+            }
             break;
         }
         case 5: { /* C3D_WATER: el proceso ES el agua del mundo */

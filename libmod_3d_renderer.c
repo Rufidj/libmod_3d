@@ -5,6 +5,7 @@
  */
 
 #include "libmod_3d_renderer.h"
+#include "libmod_3d_sprite.h"
 #include "libmod_3d_glcaps.h"
 #include "libmod_3d_shader.h"
 #include "libmod_3d_mesh.h"
@@ -256,6 +257,21 @@ void g3d_renderer_shutdown(void) {
    CONFIGURATION
    ============================================================================
  */
+
+/* La camara activa, para quien la necesite fuera del renderer (los sprites la
+   usan para saber desde donde se les mira). */
+G3DCamera *g3d_renderer_get_camera(void) { return g_renderer.active_camera; }
+
+/* La luz ambiental de la escena, para quien la necesite fuera del renderer (los
+   sprites la usan para no ir siempre a pleno brillo). */
+void g3d_renderer_get_ambient(float *rgb, float *intensity) {
+    if (rgb) {
+        rgb[0] = g_renderer.ambient_color[0];
+        rgb[1] = g_renderer.ambient_color[1];
+        rgb[2] = g_renderer.ambient_color[2];
+    }
+    if (intensity) *intensity = g_renderer.ambient_intensity;
+}
 
 void g3d_renderer_set_camera(G3DCamera *camera) {
     if (!camera)
@@ -592,6 +608,9 @@ void g3d_renderer_shadow_pass(void) {
 
     /* Instanced vegetation/props also cast shadows */
     g3d_instances_render_depth(g_renderer.light_space_matrix);
+    /* Los sprites tambien proyectan sombra, con su mismo recorte alfa: es lo que
+       hace que un personaje dibujado se apoye de verdad en el suelo. */
+    g3d_sprites_render_depth(g_renderer.light_space_matrix.m);
 
     glDisable(GL_POLYGON_OFFSET_FILL);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
@@ -1593,6 +1612,9 @@ void g3d_renderer_render(void) {
     g3d_renderer_forward_pass();
     /* Instanced vegetation/props (opaque, one draw call per group) */
     g3d_instances_render_all(g_renderer.active_camera, g_renderer.flip_y);
+    /* Sprites 2D del mundo (personajes estilo HD-2D): van en el pase OPACO, con
+       recorte alfa, para que tapen y sean tapados por la geometria sin ordenar. */
+    g3d_sprites_render(g_renderer.active_camera, g_renderer.flip_y);
     /* Depth now holds the opaque occluders: test every entity's box against it
        so the next frame can skip whatever is fully hidden. */
     {

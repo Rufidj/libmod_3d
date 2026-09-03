@@ -1065,6 +1065,12 @@ static const char *g3d_water_glsl_swash_frag =
     "    vec4 f = waterSampleField(P.xz);\n"
     "    if (f.y > 0.02) discard;\n"          /* already under water */
     "\n"
+    /* La espuma se posa en el SUELO. Sin esto se pinta igual en la corteza de un
+       arbol o en un sprite (que es un plano vertical). La normal se saca de la
+       profundidad, que es lo unico que hay aqui. */
+    "    vec3 nrm = normalize(cross(dFdx(P), dFdy(P)));\n"
+    "    if (abs(nrm.y) < 0.55) discard;\n"
+    "\n"
     /* Height above the still water. With a sea, its level is the reference
        everywhere -- and it has to be, because the field texture only carries a
        meaningful surface level for dry cells within a cell or two of the water.
@@ -1086,6 +1092,7 @@ static const char *g3d_water_glsl_swash_frag =
     "        near = max(near, waterSampleField(P.xz + dir * 4.0).y);\n"
     "        near = max(near, waterSampleField(P.xz + dir * 11.0).y);\n"
     "    }\n"
+    "    if (near <= 0.02) discard;\n"       /* no hay agua cerca: aqui no llega */
     "    // sin acotar\n"
     "\n"
     "    float still = (uSeaLevel > -1.0e29) ? uSeaLevel : f.x;\n"

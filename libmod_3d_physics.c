@@ -142,6 +142,25 @@ int g3d_collider_add_box(float minx, float miny, float minz,
     }
     return -1;
 }
+/* Mover (o redimensionar) una caja ya puesta. Hace falta para lo que se mueve:
+   un NPC que patrulla y corta el paso lleva su caja pegada, en vez de sembrar el
+   mapa de cajas fijas. */
+void g3d_collider_set_box(int id, float minx, float miny, float minz,
+                          float maxx, float maxy, float maxz) {
+    if (id < 0 || id >= MAX_BOXES || !g_boxes[id].active) return;
+    g_boxes[id].mn[0] = minx < maxx ? minx : maxx;
+    g_boxes[id].mn[1] = miny < maxy ? miny : maxy;
+    g_boxes[id].mn[2] = minz < maxz ? minz : maxz;
+    g_boxes[id].mx[0] = minx > maxx ? minx : maxx;
+    g_boxes[id].mx[1] = miny > maxy ? miny : maxy;
+    g_boxes[id].mx[2] = minz > maxz ? minz : maxz;
+}
+
+void g3d_collider_remove_box(int id) {
+    if (id < 0 || id >= MAX_BOXES) return;
+    g_boxes[id].active = 0;
+}
+
 void g3d_collider_clear(void) {
     for (int i = 0; i < MAX_BOXES; i++) g_boxes[i].active = 0;
 }

@@ -65,6 +65,9 @@ float g3d_camera_safe_distance(float tx, float ty, float tz,
                                float dx, float dy, float dz,
                                float dist, float radius);
 
+void g3d_collider_set_box(int id, float minx, float miny, float minz,
+                          float maxx, float maxy, float maxz);
+void g3d_collider_remove_box(int id);
 int  g3d_collider_add_box(float minx, float miny, float minz,
                           float maxx, float maxy, float maxz);
 void g3d_collider_clear(void);

@@ -148,6 +148,8 @@ int g3d_renderer_init(uint32_t width, uint32_t height);
 void g3d_renderer_shutdown(void);
 
 /* Set active camera */
+G3DCamera *g3d_renderer_get_camera(void);
+void g3d_renderer_get_ambient(float *rgb, float *intensity);
 void g3d_renderer_set_camera(G3DCamera *camera);
 
 /* Set render target FBO (0 = screen). Also sets flip_y = (fbo != 0). */

@@ -35,6 +35,13 @@ DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
        proceso no es "un lago" sino el agua. */
     {"C3D_WATER",               TYPE_QWORD, 5},
 
+    /* Sprite 2D en el mundo 3D (personajes/objetos dibujados, estilo HD-2D):
+       el proceso pone file/graph como en 2D y el motor lo planta en la escena
+       mirando a la camara. */
+    {"C3D_SPRITE",              TYPE_QWORD, 6},
+    {"G3D_SPRITE_UPRIGHT",      TYPE_QWORD, 0},   /* de pie (personajes) */
+    {"G3D_SPRITE_FACING",       TYPE_QWORD, 1},   /* de cara del todo (items, efectos) */
+
     {NULL, 0, 0}
 };
 
@@ -76,6 +83,16 @@ char * __bgdexport(libmod_3d, locals_def) =
        marcha, no recompilar. -1 = no tocar lo que ya haya. */
     "   DOUBLE evaporation = -1.0;\n"
     "   DOUBLE flow = -1.0;\n"
+    "END\n"
+    /* Sprite 2D en el mundo (C3D_SPRITE). El grafico se elige como en 2D con
+       file/graph; esto es solo para las HOJAS de sprites: un unico grafico
+       partido en cols x filas del que se dibuja el fotograma 'frame'. Con
+       cols = 0 se usa el grafico entero (un FPG ya trae un grafico por
+       fotograma). */
+    "STRUCT sprite\n"
+    "   INT cols = 0;\n"
+    "   INT rows = 0;\n"
+    "   INT frame = 0;\n"
     "END\n"
     ;
 
@@ -156,6 +173,21 @@ int64_t g3d_rigidbody_set_model_offset_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_spawn_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_load_md3_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_texture_load_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_collider_set_box_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_collider_remove_box_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_destroy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_height_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_ppu_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_anchor_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_billboard_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_cutout_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_shadow_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_dir_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_smooth_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_lit_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_snap_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_sprite_set_cell_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_create_type_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_light_set_position_bgd(INSTANCE *my, int64_t *params);
@@ -415,6 +447,20 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     // FUNC("G3D_INIT", "II", TYPE_INT, g3d_init_bgd),
     // FUNC("G3D_SHUTDOWN", "", TYPE_INT, g3d_shutdown_bgd),
     // FUNC("G3D_RENDER", "I", TYPE_INT, g3d_render_bgd),
+    /* Sprites 2D en el mundo 3D */
+    FUNC("G3D_SPRITE_CREATE", "IFFF", TYPE_INT, g3d_sprite_create_bgd),
+    FUNC("G3D_SPRITE_DESTROY", "I", TYPE_INT, g3d_sprite_destroy_bgd),
+    FUNC("G3D_SPRITE_SET_HEIGHT", "IF", TYPE_INT, g3d_sprite_set_height_bgd),
+    FUNC("G3D_SPRITE_SET_PIXELS_PER_UNIT", "IF", TYPE_INT, g3d_sprite_set_ppu_bgd),
+    FUNC("G3D_SPRITE_SET_ANCHOR", "IFF", TYPE_INT, g3d_sprite_set_anchor_bgd),
+    FUNC("G3D_SPRITE_SET_BILLBOARD", "II", TYPE_INT, g3d_sprite_set_billboard_bgd),
+    FUNC("G3D_SPRITE_SET_CUTOUT", "IF", TYPE_INT, g3d_sprite_set_cutout_bgd),
+    FUNC("G3D_SPRITE_SET_SHADOW", "II", TYPE_INT, g3d_sprite_set_shadow_bgd),
+    FUNC("G3D_SPRITE_DIR", "IFI", TYPE_INT, g3d_sprite_dir_bgd),
+    FUNC("G3D_SPRITE_SET_SMOOTH", "II", TYPE_INT, g3d_sprite_set_smooth_bgd),
+    FUNC("G3D_SPRITE_SET_LIT", "II", TYPE_INT, g3d_sprite_set_lit_bgd),
+    FUNC("G3D_SPRITE_SET_SNAP", "II", TYPE_INT, g3d_sprite_set_snap_bgd),
+    FUNC("G3D_SPRITE_SET_CELL", "IIIII", TYPE_INT, g3d_sprite_set_cell_bgd),
     FUNC("G3D_SCENE_CREATE", "S", TYPE_INT, g3d_scene_create_bgd),
     FUNC("G3D_SCENE_DESTROY", "I", TYPE_INT, g3d_scene_destroy_bgd),
     FUNC("G3D_SCENE_SET_ACTIVE", "I", TYPE_INT, g3d_scene_set_active_bgd),
@@ -523,6 +569,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_COLLIDER_ADD_BOX", "FFFFFF", TYPE_INT, g3d_collider_add_box_bgd),
     FUNC("G3D_CAMERA_SAFE_DISTANCE", "FFFFFFFF", TYPE_FLOAT, g3d_camera_safe_distance_bgd),
     FUNC("G3D_COLLIDER_CLEAR", "", TYPE_INT, g3d_collider_clear_bgd),
+    FUNC("G3D_COLLIDER_SET_BOX", "IFFFFFF", TYPE_INT, g3d_collider_set_box_bgd),
+    FUNC("G3D_COLLIDER_REMOVE_BOX", "I", TYPE_INT, g3d_collider_remove_box_bgd),
     FUNC("G3D_VEHICLE_CREATE", "FFFF", TYPE_INT, g3d_vehicle_create_bgd),
     FUNC("G3D_VEHICLE_DESTROY", "I", TYPE_INT, g3d_vehicle_destroy_bgd),
     FUNC("G3D_VEHICLE_UPDATE", "IFFFF", TYPE_INT, g3d_vehicle_update_bgd),

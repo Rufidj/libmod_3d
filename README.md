@@ -17,6 +17,46 @@ A forward-rendering 3D engine for BennuGD2 with real-time shadow mapping support
 - ✅ Asset loading stubs (glTF, MD3, textures)
 - ⏳ Forward rendering pipeline (under development)
 
+## Sprites 2D en el mundo 3D (estilo HD-2D / Octopath)
+
+Un sprite es un **proceso de BennuGD2 de toda la vida**, pero puesto en el espacio 3D:
+mira siempre a la camara, se dibuja en el pase opaco con recorte alfa (asi tapa y es
+tapado por la geometria sin ordenar nada) y proyecta su silueta en el mapa de sombras.
+La textura es **el mismo grafico de BennuGD2** (`map_load` / `fpg_load`), sin cargarlo
+dos veces ni inventar formatos.
+
+```prg
+PROCESS heroe()
+BEGIN
+    ctype = C_3D;  csubtype = C3D_SPRITE;
+    entity = g3d_sprite_create(scene, 0.0, 0.0, 0.0);
+    g3d_sprite_set_height(entity, 3.5);      // alto en unidades de mundo
+    file = 0;  graph = hoja;                 // el grafico manda, como en 2D
+    sprite.cols = 8;  sprite.rows = 4;       // hoja de sprites partida en celdas
+    LOOP
+        x += 0.1;  angle = rumbo;            // se mueve por el mundo 3D
+        // 16 posturas: la direccion se calcula respecto a la CAMARA
+        sprite.frame = g3d_sprite_dir(entity, angle, 16) * pasos + paso;
+        FRAME;
+    END
+END
+```
+
+- **Locales:** `x/y/z` (posicion en el mundo), `angle`, `size`, `alpha`, `color_r/g/b`,
+  `flags` (1 = espejo) y `file`/`graph`. Animar = cambiar `graph` (FPG) o
+  `sprite.frame` (hoja de sprites).
+- **Anclaje:** el punto de control 0 del grafico (`center_set`) es el que se planta en
+  x,y,z — ponlo en los pies y el personaje se apoya solo en el suelo.
+- **Luz:** `g3d_sprite_set_lit(entity, 1)` (por defecto) hace que el sprite reciba la
+  luz ambiental y la del sol de la escena, para que se apague de noche.
+- **Colision movil:** `g3d_collider_add_box` + `g3d_collider_set_box(caja, ...)` para
+  un NPC que corta el paso mientras anda (`g3d_collider_remove_box` lo quita).
+- **Funciones:** `g3d_sprite_create`, `g3d_sprite_set_height`,
+  `g3d_sprite_set_pixels_per_unit`, `g3d_sprite_set_anchor`, `g3d_sprite_set_billboard`
+  (`G3D_SPRITE_UPRIGHT` / `G3D_SPRITE_FACING`), `g3d_sprite_set_cutout`,
+  `g3d_sprite_set_smooth`, `g3d_sprite_set_shadow`, `g3d_sprite_set_cell`,
+  `g3d_sprite_dir`, `g3d_sprite_destroy`.
+
 ## Quick Start
 
 ```prg
