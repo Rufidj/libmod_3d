@@ -555,6 +555,37 @@ void g3d_instances_clear(int group) {
     if (group >= 0 && group < MAX_GROUPS && g_inst.g[group].active)
         g_inst.g[group].count = 0;
 }
+/* Devolver el hueco, no solo vaciarlo.
+   El fondo de grupos es fijo (MAX_GROUPS) y _clear deja el grupo OCUPADO: sirve
+   para volver a llenarlo (pintar vegetacion es iterativo), pero quien ya no lo
+   quiera tiene que soltarlo. Sin esto, cada limpieza del sembrado -- cargar una
+   escena, abrir un proyecto -- se llevaba sus huecos para siempre, y al cabo de
+   unas cuantas cargas no quedaba ninguno: seguias sembrando y lo nuevo no
+   aparecia, sin un solo mensaje. */
+void g3d_instances_destroy(int group) {
+    if (group < 0 || group >= MAX_GROUPS) return;
+    Group *gr = &g_inst.g[group];
+    if (!gr->active) return;
+#ifndef VITA
+    if (gr->inst_vbo) { glDeleteBuffers(1, &gr->inst_vbo); gr->inst_vbo = 0; }
+    if (gr->vao) { glDeleteVertexArrays(1, &gr->vao); gr->vao = 0; }
+#endif
+    free(gr->mats);   gr->mats = NULL;
+    free(gr->visible); gr->visible = NULL;
+    free(gr->cells);      gr->cells = NULL;
+    free(gr->cell_start); gr->cell_start = NULL;
+    free(gr->cell_y);     gr->cell_y = NULL;
+    gr->count = 0; gr->cap = 0;
+    gr->mesh = NULL; gr->tex = 0;
+    gr->active = 0;
+}
+/* Cuantos huecos quedan libres. El editor lo usa para avisar antes de que
+   sembrar deje de funcionar en silencio. */
+int g3d_instances_free_slots(void) {
+    int n = 0;
+    for (int i = 0; i < MAX_GROUPS; i++) if (!g_inst.g[i].active) n++;
+    return n;
+}
 int g3d_instances_count(int group) {
     if (group < 0 || group >= MAX_GROUPS || !g_inst.g[group].active) return 0;
     return g_inst.g[group].count;

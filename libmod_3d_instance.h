@@ -48,7 +48,9 @@ void g3d_instances_set_distance(int group, float dist);
    los dos grupos tienen las MISMAS transformaciones -- el caso de las piezas de
    un modelo instanciado, que estan todas en el mismo sitio. */
 void g3d_instances_share_cull(int group, int src);
-void g3d_instances_clear(int group);
+void g3d_instances_clear(int group);      /* lo vacia, pero se queda el hueco */
+void g3d_instances_destroy(int group);    /* devuelve el hueco al fondo */
+int  g3d_instances_free_slots(void);      /* cuantos quedan libres */
 int g3d_instances_count(int group);
 
 /* Data-driven population (what an editor configures): scatter `count` copies of

@@ -115,7 +115,11 @@ static SCKind *sc_find(const char *asset, int create) {
 
 void g3d_scatter_clear(void) {
     for (int i = 0; i < g_kinds; i++) {
-        for (int g = 0; g < g_kind[i].ngroups; g++) g3d_instances_clear(g_kind[i].groups[g]);
+        /* Aqui se OLVIDAN los grupos (se borran las especies enteras), asi que hay
+           que devolver sus huecos al fondo. Vaciarlos y nada mas los dejaba
+           ocupados: tras unas cuantas cargas de escena no quedaba ninguno libre y
+           lo que sembrabas ya no aparecia. */
+        for (int g = 0; g < g_kind[i].ngroups; g++) g3d_instances_destroy(g_kind[i].groups[g]);
         free(g_kind[i].asset);
         free(g_kind[i].items);
     }
