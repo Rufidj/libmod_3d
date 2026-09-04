@@ -131,7 +131,15 @@ void g3d_rigidbody_set_ccd(int id, int enabled);
    handle >= 0 or -1. */
 int  g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, float scale);
 
+/* Colision del modelo ENTERO (todas sus submallas en UNA forma). La malla exacta
+   es para lo que no se mueve (paredes, suelos, un nivel); la envolvente convexa
+   para lo que si (un barril, una caja): se ajusta al modelo sin dar tamanios. */
+int  g3d_collider_add_model(void *model, float x, float y, float z, float scale);
+int  g3d_rigidbody_create_convex_model(float x, float y, float z,
+                                       void *model, float scale, float mass);
+
 /* Read a submesh's CPU geometry (implemented in libmod_3d.c). */
+int  g3d_physics_submesh_count(void *model);
 int  g3d_physics_submesh_geom(void *model, int submesh, const float **pos,
                               int *stride_floats, const unsigned int **indices, int *icount);
 void g3d_rigidbody_destroy(int id);

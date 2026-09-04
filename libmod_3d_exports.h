@@ -401,6 +401,8 @@ int64_t g3d_physics_set_gravity_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_safe_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_scatter_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_zone_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_watersim_clear_sources_bgd(INSTANCE *my, int64_t *params);
@@ -599,6 +601,9 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_RIGIDBODY_CREATE_CONVEX", "FFFIIFF", TYPE_INT, g3d_rigidbody_create_convex_bgd),
     FUNC("G3D_RIGIDBODY_SET_CCD", "II", TYPE_INT, g3d_rigidbody_set_ccd_bgd),
     FUNC("G3D_COLLIDER_ADD_MESH", "IIFFFF", TYPE_INT, g3d_collider_add_mesh_bgd),
+    /* el modelo entero de una vez: malla exacta (fija) o envolvente (se mueve) */
+    FUNC("G3D_COLLIDER_ADD_MODEL", "IFFFF", TYPE_INT, g3d_collider_add_model_bgd),
+    FUNC("G3D_RIGIDBODY_CREATE_CONVEX_MODEL", "FFFIFF", TYPE_INT, g3d_rigidbody_create_convex_model_bgd),
     FUNC("G3D_RIGIDBODY_DESTROY", "I", TYPE_INT, g3d_rigidbody_destroy_bgd),
     FUNC("G3D_RIGIDBODY_CLEAR", "", TYPE_INT, g3d_rigidbody_clear_bgd),
     FUNC("G3D_RIGIDBODY_STEP", "F", TYPE_INT, g3d_rigidbody_step_bgd),

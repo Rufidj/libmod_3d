@@ -239,6 +239,104 @@ void g3d_rigidbody_set_ccd(int id, int enabled) {
 }
 
 /* Static triangle-mesh collider from a model submesh (level geometry). */
+/* ---- El MODELO ENTERO, de una vez ----
+   Un objeto del editor es un modelo con sus submallas (una silla trae asiento,
+   patas y respaldo). Las dos funciones de arriba trabajan submalla a submalla,
+   asi que para poner la colision de un objeto completo habia que llamarlas en
+   bucle y salian N cuerpos. Estas dos juntan todas las submallas en UNA forma:
+   la exacta para lo que no se mueve, y la envolvente para lo que si. */
+
+/* Malla exacta (triangulo a triangulo) de todas las submallas: paredes, suelos,
+   escaleras, un nivel entero. No se mueve nunca (Jolt no admite malla movil). */
+int g3d_collider_add_model(void *model, float x, float y, float z, float scale) {
+    jolt_init();
+    int nsub = g3d_physics_submesh_count(model);
+    if (nsub <= 0) return -1;
+    if (scale <= 0.0f) scale = 1.0f;
+
+    VertexList verts;
+    IndexedTriangleList tris;
+    for (int sm = 0; sm < nsub; sm++) {
+        const float *pos = nullptr; const unsigned int *idx = nullptr;
+        int stride = 0, icount = 0;
+        int vcount = g3d_physics_submesh_geom(model, sm, &pos, &stride, &idx, &icount);
+        if (vcount < 3 || icount < 3 || !pos || !idx) continue;
+        unsigned int base = (unsigned int)verts.size();
+        for (int i = 0; i < vcount; i++)
+            verts.push_back(Float3(pos[i*stride+0]*scale, pos[i*stride+1]*scale, pos[i*stride+2]*scale));
+        for (int i = 0; i + 2 < icount; i += 3)
+            tris.push_back(IndexedTriangle(base + idx[i], base + idx[i+1], base + idx[i+2], 0));
+    }
+    if (verts.size() < 3 || tris.empty()) return -1;
+
+    MeshShapeSettings ms(verts, tris);
+    ShapeSettings::ShapeResult r = ms.Create();
+    if (r.HasError()) return -1;
+
+    BodyCreationSettings bcs(r.Get(), RVec3(x, y, z), Quat::sIdentity(),
+                             EMotionType::Static, Layers::NON_MOVING);
+    bcs.mFriction = 0.6f;
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    BodyID bid = bi.CreateAndAddBody(bcs, EActivation::DontActivate);
+    g_ps->OptimizeBroadPhase();
+    int s = jrb_slot();
+    if (s < 0) return -1;
+    g_rb[s].id = bid; g_rb[s].hx = g_rb[s].hy = g_rb[s].hz = 0.0f;
+    g_rb[s].ox = g_rb[s].oy = g_rb[s].oz = 0.0f;
+    g_rb[s].upright = 0.0f; g_rb[s].mass = 1.0f;
+    g_rb[s].buoy_dens = 0.0f; g_rb[s].buoy_y = 0.0f; g_rb[s].active = 1;
+    g_mesh_count++;
+    return s;
+}
+
+/* Envolvente convexa de TODAS las submallas: la forma del modelo, sin huecos ni
+   concavidades. Es lo que hay que usar para lo que se mueve (un barril, una
+   caja, una roca que rueda): se ajusta al modelo sin tener que dar tamanios. */
+int g3d_rigidbody_create_convex_model(float x, float y, float z,
+                                      void *model, float scale, float mass) {
+    jolt_init();
+    int nsub = g3d_physics_submesh_count(model);
+    if (nsub <= 0) return -1;
+    if (scale <= 0.0f) scale = 1.0f;
+
+    /* Una envolvente solo necesita PUNTOS, asi que juntar las submallas es tan
+       simple como amontonar sus vertices: no hay indices que rehacer. */
+    Array<Vec3> pts;
+    double cx = 0, cy = 0, cz = 0; int total = 0;
+    for (int sm = 0; sm < nsub; sm++) {
+        const float *pos = nullptr; int stride = 0;
+        int vcount = g3d_physics_submesh_geom(model, sm, &pos, &stride, nullptr, nullptr);
+        if (vcount < 1 || !pos) continue;
+        for (int i = 0; i < vcount; i++) {
+            cx += pos[i*stride+0]; cy += pos[i*stride+1]; cz += pos[i*stride+2];
+            total++;
+        }
+    }
+    if (total < 4) return -1;
+    cx /= total; cy /= total; cz /= total;
+    /* el centro, para que el cuerpo gire por donde debe (igual que la caja) */
+    for (int sm = 0; sm < nsub; sm++) {
+        const float *pos = nullptr; int stride = 0;
+        int vcount = g3d_physics_submesh_geom(model, sm, &pos, &stride, nullptr, nullptr);
+        if (vcount < 1 || !pos) continue;
+        for (int i = 0; i < vcount; i++)
+            pts.push_back(Vec3((float)((pos[i*stride+0]-cx)*scale),
+                               (float)((pos[i*stride+1]-cy)*scale),
+                               (float)((pos[i*stride+2]-cz)*scale)));
+    }
+    if (pts.size() < 4) return -1;
+
+    ConvexHullShapeSettings hs(pts);
+    ShapeSettings::ShapeResult r = hs.Create();
+    if (r.HasError()) return -1;
+
+    int s = jrb_add_dynamic(r.Get().GetPtr(),
+                            x + (float)cx*scale, y + (float)cy*scale, z + (float)cz*scale,
+                            mass, 0.5f, 0.5f, 0.5f, 0.0f);
+    if (s >= 0) { g_rb[s].ox = (float)cx*scale; g_rb[s].oy = (float)cy*scale; g_rb[s].oz = (float)cz*scale; }
+    return s;
+}
+
 int g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, float scale) {
     jolt_init();
     const float *pos = nullptr; const unsigned int *idx = nullptr;

@@ -998,6 +998,13 @@ static float g3d_submesh_aabb(void *mp, int i, int comp, int half) {
    count (0 on failure); *pos -> first position, *stride_floats = floats between
    consecutive vertices. Declared in libmod_3d_physics.h and used by the Jolt
    backend. */
+/* Cuantas submallas tiene un modelo. Lo pide la fisica para montar la colision
+   del modelo ENTERO (una silla son asiento, patas y respaldo). */
+int g3d_physics_submesh_count(void *mp) {
+    G3DModel *m = (G3DModel *)mp;
+    return m ? (int)m->mesh_count : 0;
+}
+
 int g3d_physics_submesh_geom(void *mp, int i, const float **pos, int *stride_floats,
                              const unsigned int **indices, int *icount) {
     G3DModel *m = (G3DModel *)mp;
@@ -2462,6 +2469,16 @@ int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params) {
                                 *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
 }
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params) { g3d_collider_clear(); return 1; }
+/* La colision del modelo entero: exacta (fija) o su envolvente (se mueve). */
+int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_collider_add_model((void*)(intptr_t)params[0], *(float*)&params[1],
+                                  *(float*)&params[2], *(float*)&params[3], *(float*)&params[4]);
+}
+int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rigidbody_create_convex_model(*(float*)&params[0], *(float*)&params[1],
+                                             *(float*)&params[2], (void*)(intptr_t)params[3],
+                                             *(float*)&params[4], *(float*)&params[5]);
+}
 /* ---- Deshacer una escena para montar otra ----
    Estas cuatro existian en C pero no estaban en la lista de BennuGD2, asi que un
    juego que cambia de mapa no podia soltar la vegetacion, las zonas pintadas, los
