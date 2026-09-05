@@ -21,7 +21,7 @@
 
 #define MAX_ROPES 32
 #define LADOS     6          /* lados del tubo: con 6 ya parece redonda */
-#define ITERS     8          /* relajaciones por frame: una cuerda estira poco */
+#define ITERS     8          /* con 8 la curva ya sale exacta (medido); mas solo cuesta */
 
 typedef struct {
     int active;
