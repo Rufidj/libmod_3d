@@ -32,6 +32,44 @@ typedef struct {
 
 static Cloth g_cloths[MAX_CLOTHS];
 
+/* ---- EMPUJONES: cualquier cosa puede apartar una tela ----
+   Un objeto (el jugador, un barril que rueda, un coche) llama a g3d_cloth_push()
+   una vez por frame con donde esta y su grosor, y TODAS las telas lo notan. Se
+   guardan con su marca de tiempo y se olvidan solos en cuanto el que empujaba
+   deja de llamar, asi que no hay que dar de baja a nadie ni saber ids. */
+#define MAX_PUSH 32
+typedef struct { Vec3 p; float r; Uint32 t; } ClothPush;
+static ClothPush g_push[MAX_PUSH];
+static int       g_push_n = 0;
+
+void g3d_cloth_push(float x, float y, float z, float radius) {
+    if (radius <= 0.0f) return;
+    Uint32 ahora = SDL_GetTicks();
+    /* si ese mismo sitio ya estaba empujando, se refresca en vez de crecer */
+    for (int i = 0; i < g_push_n; i++) {
+        Vec3 d = vec3_sub(g_push[i].p, vec3_make(x, y, z));
+        if (sqrtf(d.x * d.x + d.y * d.y + d.z * d.z) < 0.001f) {
+            g_push[i].p = vec3_make(x, y, z); g_push[i].r = radius; g_push[i].t = ahora;
+            return;
+        }
+    }
+    if (g_push_n < MAX_PUSH) {
+        g_push[g_push_n].p = vec3_make(x, y, z);
+        g_push[g_push_n].r = radius;
+        g_push[g_push_n].t = ahora;
+        g_push_n++;
+    }
+}
+
+/* Se quedan los de este frame (60 ms de margen); los demas se caen de la lista. */
+static void push_caducar(void) {
+    Uint32 ahora = SDL_GetTicks();
+    int j = 0;
+    for (int i = 0; i < g_push_n; i++)
+        if (ahora - g_push[i].t <= 60) g_push[j++] = g_push[i];
+    g_push_n = j;
+}
+
 static inline int IDX(Cloth *c, int i, int j) { return i + j * c->nx; }
 
 int g3d_cloth_create(float width, float height, int nx, int ny,
@@ -183,6 +221,17 @@ void g3d_cloth_update(int cloth, float dt) {
     }
 
     /* Sphere collision (the character) */
+    /* los empujones de este frame: los aparta igual que el collider propio */
+    push_caducar();
+    for (int e = 0; e < g_push_n; e++) {
+        for (int k = 0; k < np; k++) {
+            if (c->pinned[k]) continue;
+            Vec3 d = vec3_sub(c->pos[k], g_push[e].p);
+            float len = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
+            if (len < g_push[e].r && len > 1e-5f)
+                c->pos[k] = vec3_add(g_push[e].p, vec3_scale(d, g_push[e].r / len));
+        }
+    }
     if (c->hasCol) {
         for (int k = 0; k < np; k++) {
             if (c->pinned[k]) continue;

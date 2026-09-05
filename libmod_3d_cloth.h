@@ -25,6 +25,10 @@ void g3d_cloth_pin(int cloth, int mode);
 
 void g3d_cloth_set_wind(int cloth, float x, float y, float z, float strength);
 void g3d_cloth_set_collider(int cloth, float x, float y, float z, float radius);
+/* Empujon global: lo llama CUALQUIER cosa que deba apartar las telas (el jugador,
+   un barril que rueda, un coche), una vez por frame con donde esta y su grosor.
+   Lo notan todas las telas y se olvida solo si deja de llamarse. */
+void g3d_cloth_push(float x, float y, float z, float radius);
 void g3d_cloth_clear_collider(int cloth);
 void g3d_cloth_set_texture(int cloth, unsigned int gl_handle);
 

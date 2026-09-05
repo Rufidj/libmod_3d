@@ -39,6 +39,10 @@ DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
        el proceso pone file/graph como en 2D y el motor lo planta en la escena
        mirando a la camara. */
     {"C3D_SPRITE",              TYPE_QWORD, 6},
+    /* Una TELA (bandera, cortina, toldo): el proceso ES la tela, y su viento se
+       maneja con las locales de siempre -- 'wind' la fuerza y target_x/y/z hacia
+       donde sopla, igual que la vegetacion usa 'wind'. */
+    {"C3D_CLOTH",               TYPE_QWORD, 7},
     {"G3D_SPRITE_UPRIGHT",      TYPE_QWORD, 0},   /* de pie (personajes) */
     {"G3D_SPRITE_FACING",       TYPE_QWORD, 1},   /* de cara del todo (items, efectos) */
 
@@ -355,6 +359,7 @@ int64_t g3d_cloth_set_collider_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_clear_collider_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_update_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_cloth_push_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_river_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_texture_bgd(INSTANCE *my, int64_t *params);
@@ -774,6 +779,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CLOTH_CLEAR_COLLIDER", "I", TYPE_INT, g3d_cloth_clear_collider_bgd),
     FUNC("G3D_CLOTH_SET_TEXTURE", "II", TYPE_INT, g3d_cloth_set_texture_bgd),
     FUNC("G3D_CLOTH_UPDATE", "IF", TYPE_INT, g3d_cloth_update_bgd),
+    /* empujon global: lo llama quien deba apartar las telas, una vez por frame */
+    FUNC("G3D_CLOTH_PUSH", "FFFF", TYPE_INT, g3d_cloth_push_bgd),
     FUNC("G3D_FLOW_ADD", "FFFFFFFFF", TYPE_INT, g3d_flow_add_bgd),
     FUNC("G3D_FLOW_ADD_RIVER", "IFFFFFFFF", TYPE_INT, g3d_flow_add_river_bgd),
     FUNC("G3D_FLOW_SET_TEXTURE", "I", TYPE_INT, g3d_flow_set_texture_bgd),

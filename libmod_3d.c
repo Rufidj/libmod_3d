@@ -2133,6 +2133,11 @@ int64_t g3d_cloth_set_texture_bgd(INSTANCE *my, int64_t *params) {
     g3d_cloth_set_texture((int)params[0], t ? t->gl_handle : 0);
     return 1;
 }
+int64_t g3d_cloth_push_bgd(INSTANCE *my, int64_t *params) {
+    g3d_cloth_push(*(float *)&params[0], *(float *)&params[1],
+                   *(float *)&params[2], *(float *)&params[3]);
+    return 1;
+}
 int64_t g3d_cloth_update_bgd(INSTANCE *my, int64_t *params) {
     g3d_cloth_update((int)params[0], *(float *)&params[1]); return 1;
 }
@@ -2757,6 +2762,37 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
             if ( ev >= 0.0 ) g3d_waterfield_set_evaporation( (float) ev );
             double fl = LOCDOUBLE( libmod_3d, i, LOC3D_W_FLOW );
             if ( fl >= 0.0 ) g3d_waterfield_set_viscosity( (float) fl );
+            break;
+        }
+
+        case 7: { /* C3D_CLOTH: el proceso ES la tela (bandera, cortina, toldo) */
+            /* El viento sale de las locales: 'wind' la fuerza y target_x/y/z la
+               direccion, igual que en la vegetacion. Cambiarlas en marcha (una
+               racha, una tormenta) se nota al frame siguiente. */
+            g3d_cloth_set_wind( entity_id,
+                                (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_X ),
+                                (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_Y ),
+                                (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_Z ),
+                                (float) LOCDOUBLE( libmod_3d, i, LOC3D_WIND ) );
+            /* Y se avanza la simulacion. El paso se mide aqui porque el hook no
+               recibe el tiempo de frame: si dos telas caen en el mismo
+               milisegundo, la segunda reusa el paso de la primera (que es lo
+               correcto: es el mismo frame). Se limita a 50 ms para que un tiron
+               no reviente la tela. */
+            {
+                static Uint32 ultimo = 0;
+                static float  paso   = 1.0f / 60.0f;
+                Uint32 ahora = SDL_GetTicks();
+                if ( ahora != ultimo ) {
+                    if ( ultimo ) {
+                        paso = ( ahora - ultimo ) / 1000.0f;
+                        if ( paso > 0.05f ) paso = 0.05f;
+                        if ( paso <= 0.0f ) paso = 1.0f / 60.0f;
+                    }
+                    ultimo = ahora;
+                }
+                g3d_cloth_update( entity_id, paso );
+            }
             break;
         }
 
