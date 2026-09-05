@@ -308,6 +308,11 @@ void g3d_rope_update(int rope, float dt) {
             v->texcoord[1] = (float)i * r->seg;   /* la textura se repite a lo largo */
         }
     }
+    /* La caja envolvente TIENE que rehacerse: la malla nace con los vertices a
+       cero y, si no se actualiza, el recorte por visibilidad se cree que la cuerda
+       esta en el origen del mundo y la descarta -- se veia solo cuando el origen
+       caia en pantalla, y en el juego no se veia nunca. La tela ya lo hacia. */
+    g3d_mesh_calculate_bounds(r->mesh);
     g3d_mesh_update_gpu(r->mesh);
 }
 
