@@ -25,6 +25,9 @@ void g3d_rope_pin(int rope, int extremo, int fijo);
 /* Clava un punto cualquiera de la cuerda donde se le diga (un gancho que se mueve). */
 void g3d_rope_pin_move(int rope, int punto, float x, float y, float z);
 void g3d_rope_set_wind(int rope, float x, float y, float z, float strength);
+/* Cuelga peso de un punto: la cuerda se comba ahi. Se dice CADA FRAME mientras
+   siga colgado; si se deja de decir, la cuerda se recupera sola. */
+void g3d_rope_load(int rope, int punto, float peso);
 void g3d_rope_set_texture(int rope, unsigned int gl_handle);
 /* Donde esta ahora el punto n de la cuerda (para colgar cosas de el). */
 int  g3d_rope_point(int rope, int punto, float *x, float *y, float *z);

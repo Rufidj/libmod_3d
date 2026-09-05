@@ -373,6 +373,7 @@ int64_t g3d_rope_x_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rope_y_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rope_z_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rope_update_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_load_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rope_set_wind_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rope_destroy_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_bgd(INSTANCE *my, int64_t *params);
@@ -808,6 +809,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_ROPE_Y", "II", TYPE_FLOAT, g3d_rope_y_bgd),
     FUNC("G3D_ROPE_Z", "II", TYPE_FLOAT, g3d_rope_z_bgd),
     FUNC("G3D_ROPE_UPDATE", "IF", TYPE_INT, g3d_rope_update_bgd),
+    FUNC("G3D_ROPE_LOAD", "IIF", TYPE_INT, g3d_rope_load_bgd),
     FUNC("G3D_ROPE_SET_WIND", "IFFFF", TYPE_INT, g3d_rope_set_wind_bgd),
     FUNC("G3D_ROPE_DESTROY", "I", TYPE_INT, g3d_rope_destroy_bgd),
     FUNC("G3D_FLOW_ADD", "FFFFFFFFF", TYPE_INT, g3d_flow_add_bgd),

@@ -21,11 +21,12 @@
 
 #define MAX_ROPES 32
 #define LADOS     6          /* lados del tubo: con 6 ya parece redonda */
-#define ITERS     8          /* con 8 la curva ya sale exacta (medido); mas solo cuesta */
+#define ITERS     6          /* con el recorrido de extremo a extremo bastan pocas */
 
 typedef struct {
     int active;
     int n;                   /* particulas */
+    float *carga;            /* peso colgado en cada punto (se gasta cada frame) */
     float seg;               /* longitud de cada tramo */
     float radio;
     Vec3 *pos, *prev, *pinPos;
@@ -72,6 +73,7 @@ int g3d_rope_create(float ax, float ay, float az,
     r->prev   = (Vec3 *)malloc(r->n * sizeof(Vec3));
     r->pinPos = (Vec3 *)malloc(r->n * sizeof(Vec3));
     r->pinned = (unsigned char *)calloc(r->n, 1);
+    r->carga  = (float *)calloc(r->n, sizeof(float));
     for (int i = 0; i < r->n; i++) {
         float t = (float)i / (r->n - 1);
         Vec3 p = vec3_add(a, vec3_scale(ab, t));
@@ -128,6 +130,12 @@ void g3d_rope_pin_move(int rope, int punto, float x, float y, float z) {
     r->pinPos[punto] = vec3_make(x, y, z);
 }
 
+void g3d_rope_load(int rope, int punto, float peso) {
+    Rope *r = get(rope); if (!r) return;
+    if (punto < 0 || punto >= r->n || peso <= 0.0f) return;
+    r->carga[punto] += peso;
+}
+
 void g3d_rope_set_wind(int rope, float x, float y, float z, float strength) {
     Rope *r = get(rope); if (!r) return;
     r->wind = vec3_make(x, y, z); r->windStr = strength;
@@ -180,17 +188,81 @@ void g3d_rope_update(int rope, float dt) {
         if (r->pinned[i]) { r->pos[i] = r->prev[i] = r->pinPos[i]; continue; }
         Vec3 p = r->pos[i];
         Vec3 v = vec3_scale(vec3_sub(p, r->prev[i]), r->damp);
+        /* la gravedad, el viento y LO QUE CUELGUE de este punto */
         Vec3 acc = vec3_make(r->wind.x * r->windStr,
-                             -r->gravity + r->wind.y * r->windStr,
+                             -r->gravity - r->carga[i] + r->wind.y * r->windStr,
                              r->wind.z * r->windStr);
         r->prev[i] = p;
         r->pos[i] = vec3_add(vec3_add(p, v), vec3_scale(acc, dt * dt));
     }
 
-    /* ---- las distancias, varias pasadas ---- */
+    /* ---- las distancias, varias pasadas ----
+       De ida Y DE VUELTA: recorriendo en un solo sentido, la correccion tarda
+       muchas pasadas en llegar de un extremo al otro y la cuerda se estira -- una
+       cuerda tirante quedaba colgando mas de una unidad, o sea con panza de cable
+       flojo. Alternando sentidos converge en muchas menos vueltas. */
     for (int it = 0; it < ITERS; it++) {
         for (int i = 0; i < r->n - 1; i++) satisfy(r, i, i + 1);
+        for (int i = r->n - 2; i >= 0; i--) satisfy(r, i, i + 1);
         for (int i = 0; i < r->n; i++) if (r->pinned[i]) r->pos[i] = r->pinPos[i];
+    }
+    /* ---- y el recorrido de extremo a extremo (FABRIK) ----
+       Empujar particula a particula converge muy despacio en una cadena: con 40
+       vueltas una cuerda TIRANTE seguia cediendo media unidad, o sea con panza de
+       cable flojo. Recorriendola entera desde un extremo y colocando cada
+       particula a su distancia exacta de la anterior, el largo se respeta de una
+       pasada. Se hace en los dos sentidos y se repite un par de veces. */
+    for (int pas = 0; pas < 3; pas++) {
+        if (r->pinned[r->n - 1]) r->pos[r->n - 1] = r->pinPos[r->n - 1];
+        for (int i = r->n - 2; i >= 0; i--) {
+            if (r->pinned[i]) { r->pos[i] = r->pinPos[i]; continue; }
+            Vec3 d = vec3_sub(r->pos[i], r->pos[i + 1]);
+            float len = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
+            if (len < 1e-6f) continue;
+            r->pos[i] = vec3_add(r->pos[i + 1], vec3_scale(d, r->seg / len));
+        }
+        if (r->pinned[0]) r->pos[0] = r->pinPos[0];
+        for (int i = 1; i < r->n; i++) {
+            if (r->pinned[i]) { r->pos[i] = r->pinPos[i]; continue; }
+            Vec3 d = vec3_sub(r->pos[i], r->pos[i - 1]);
+            float len = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
+            if (len < 1e-6f) continue;
+            r->pos[i] = vec3_add(r->pos[i - 1], vec3_scale(d, r->seg / len));
+        }
+    }
+
+    /* ---- ajuste global del largo ----
+       Medido: tras resolver, una cuerda tirante de 20 media 20.06 -- un 0.3% de
+       mas. Parece nada, pero en una cuerda casi tensa ese 0.3% son 0.67 de panza:
+       la curva de una cadena es asi de sensible al largo. Ningun numero de
+       pasadas locales lo quita (40 vueltas la dejaban en 0.64), asi que se corrige
+       de una vez: se mide el largo total y, si se ha pasado, se encogen TODOS los
+       tramos en la misma proporcion, reconstruyendo desde los dos extremos y
+       promediando (con los dos extremos clavados, reconstruir solo desde uno
+       dejaria el otro fuera de su sitio). */
+    if (r->pinned[0] && r->pinned[r->n - 1]) {
+        Vec3 a = r->pinPos[0], b = r->pinPos[r->n - 1];
+        Vec3 ab = vec3_sub(b, a);
+        float vano = sqrtf(ab.x * ab.x + ab.y * ab.y + ab.z * ab.z);
+        float rest = r->seg * (r->n - 1);
+        /* Si la cuerda NO da mas de si que el vano, la solucion exacta es la
+           RECTA: no hay largo sobrante con el que hacer panza. El solucionador
+           deja siempre un pelin de estirado (medido: 0.3%) y en una cuerda tensa
+           ese pelin se ve como media unidad de panza. Aqui se la lleva a la recta
+           TIRANDO, no clavando: el viento y los empujones la separan y ella
+           vuelve, que es como se porta una cuerda tensa de verdad. */
+        if (rest <= vano * 1.002f && vano > 1e-4f) {
+            for (int i = 1; i < r->n - 1; i++) {
+                if (r->pinned[i]) continue;
+                float t = (float)i / (r->n - 1);
+                Vec3 recta = vec3_add(a, vec3_scale(ab, t));
+                /* Donde cuelga peso se tira MENOS de la recta: por eso una cuerda
+                   tensa se comba justo donde le has colgado algo, y vuelve a
+                   quedarse recta si lo quitas. */
+                float k = 0.55f / (1.0f + r->carga[i] * 8.0f);
+                r->pos[i] = vec3_add(vec3_scale(r->pos[i], 1.0f - k), vec3_scale(recta, k));
+            }
+        }
     }
 
     /* ---- lo que pase la aparta (los mismos empujones que las telas) ---- */
@@ -199,6 +271,10 @@ void g3d_rope_update(int rope, float dt) {
         if (r->pinned[i]) continue;
         g3d_push_apply(&r->pos[i].x, &r->pos[i].y, &r->pos[i].z);
     }
+
+    /* la carga se gasta: quien cuelgue algo lo dice cada frame, y si deja de
+       decirlo la cuerda se recupera sola */
+    for (int i = 0; i < r->n; i++) r->carga[i] *= 0.5f;
 
     /* ---- el tubo: un anillo por particula, orientado segun la cuerda ---- */
     if (!r->mesh || !r->mesh->vertices) return;
@@ -237,7 +313,7 @@ void g3d_rope_update(int rope, float dt) {
 
 void g3d_rope_destroy(int rope) {
     Rope *r = get(rope); if (!r) return;
-    free(r->pos); free(r->prev); free(r->pinPos); free(r->pinned);
+    free(r->pos); free(r->prev); free(r->pinPos); free(r->pinned); free(r->carga);
     r->active = 0;
 }
 

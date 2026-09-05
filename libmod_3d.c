@@ -2167,6 +2167,9 @@ int64_t g3d_rope_z_bgd(INSTANCE *my, int64_t *params) {
     float x = 0, y = 0, z = 0; g3d_rope_point((int)params[0], (int)params[1], &x, &y, &z);
     return (int64_t)*(int32_t *)&z;
 }
+int64_t g3d_rope_load_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rope_load((int)params[0], (int)params[1], *(float *)&params[2]); return 1;
+}
 int64_t g3d_rope_update_bgd(INSTANCE *my, int64_t *params) {
     g3d_rope_update((int)params[0], *(float *)&params[1]); return 1;
 }
