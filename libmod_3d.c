@@ -2133,10 +2133,14 @@ int64_t g3d_cloth_set_texture_bgd(INSTANCE *my, int64_t *params) {
     g3d_cloth_set_texture((int)params[0], t ? t->gl_handle : 0);
     return 1;
 }
+int64_t g3d_cloth_push_capsule_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_cloth_push_capsule(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                                  *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
+                                  *(float *)&params[6]);
+}
 int64_t g3d_cloth_push_bgd(INSTANCE *my, int64_t *params) {
-    g3d_cloth_push(*(float *)&params[0], *(float *)&params[1],
-                   *(float *)&params[2], *(float *)&params[3]);
-    return 1;
+    return g3d_cloth_push(*(float *)&params[0], *(float *)&params[1],
+                          *(float *)&params[2], *(float *)&params[3]);
 }
 int64_t g3d_cloth_update_bgd(INSTANCE *my, int64_t *params) {
     g3d_cloth_update((int)params[0], *(float *)&params[1]); return 1;

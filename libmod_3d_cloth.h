@@ -28,7 +28,13 @@ void g3d_cloth_set_collider(int cloth, float x, float y, float z, float radius);
 /* Empujon global: lo llama CUALQUIER cosa que deba apartar las telas (el jugador,
    un barril que rueda, un coche), una vez por frame con donde esta y su grosor.
    Lo notan todas las telas y se olvida solo si deja de llamarse. */
-void g3d_cloth_push(float x, float y, float z, float radius);
+/* Devuelve cuanta tela esta apartando ahora mismo (particulas): 0 = aire. Con
+   eso, quien empuja puede frenarse al atravesar una lona pesada. */
+int  g3d_cloth_push(float x, float y, float z, float radius);
+/* Lo mismo pero con una CAPSULA (de a a b, con radio): es la forma de un barril,
+   una persona o un coche, y evita que lo que sobresale atraviese la tela. */
+int  g3d_cloth_push_capsule(float ax, float ay, float az,
+                            float bx, float by, float bz, float radius);
 void g3d_cloth_clear_collider(int cloth);
 void g3d_cloth_set_texture(int cloth, unsigned int gl_handle);
 

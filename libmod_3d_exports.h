@@ -360,6 +360,7 @@ int64_t g3d_cloth_clear_collider_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_update_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_push_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_cloth_push_capsule_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_river_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_texture_bgd(INSTANCE *my, int64_t *params);
@@ -781,6 +782,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_CLOTH_UPDATE", "IF", TYPE_INT, g3d_cloth_update_bgd),
     /* empujon global: lo llama quien deba apartar las telas, una vez por frame */
     FUNC("G3D_CLOTH_PUSH", "FFFF", TYPE_INT, g3d_cloth_push_bgd),
+    FUNC("G3D_CLOTH_PUSH_CAPSULE", "FFFFFFF", TYPE_INT, g3d_cloth_push_capsule_bgd),
     FUNC("G3D_FLOW_ADD", "FFFFFFFFF", TYPE_INT, g3d_flow_add_bgd),
     FUNC("G3D_FLOW_ADD_RIVER", "IFFFFFFFF", TYPE_INT, g3d_flow_add_river_bgd),
     FUNC("G3D_FLOW_SET_TEXTURE", "I", TYPE_INT, g3d_flow_set_texture_bgd),

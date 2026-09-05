@@ -38,27 +38,44 @@ static Cloth g_cloths[MAX_CLOTHS];
    guardan con su marca de tiempo y se olvidan solos en cuanto el que empujaba
    deja de llamar, asi que no hay que dar de baja a nadie ni saber ids. */
 #define MAX_PUSH 32
-typedef struct { Vec3 p; float r; Uint32 t; } ClothPush;
+/* Un empujon es una CAPSULA: dos puntos y un radio. Con una esfera sola, lo que
+   sobresalia de ella (la parte de arriba de un barril, la cabeza de alguien)
+   atravesaba la tela; con la capsula la tela se apoya en todo el cuerpo. Una
+   esfera es una capsula con los dos puntos iguales. */
+typedef struct { Vec3 a, b; float r; Uint32 t; } ClothPush;
 static ClothPush g_push[MAX_PUSH];
+/* cuantas particulas aparto cada empujon en el ultimo frame: es lo que devuelve
+   g3d_cloth_push(), para que quien empuja sepa que ESTA tocando tela y pueda
+   frenarse (una lona pesada no se atraviesa como una cortina) */
+static int       g_push_hit[MAX_PUSH];
 static int       g_push_n = 0;
 
-void g3d_cloth_push(float x, float y, float z, float radius) {
-    if (radius <= 0.0f) return;
+int g3d_cloth_push_capsule(float ax, float ay, float az,
+                           float bx, float by, float bz, float radius) {
+    if (radius <= 0.0f) return 0;
     Uint32 ahora = SDL_GetTicks();
+    Vec3 a = vec3_make(ax, ay, az), b = vec3_make(bx, by, bz);
     /* si ese mismo sitio ya estaba empujando, se refresca en vez de crecer */
     for (int i = 0; i < g_push_n; i++) {
-        Vec3 d = vec3_sub(g_push[i].p, vec3_make(x, y, z));
+        Vec3 d = vec3_sub(g_push[i].a, a);
         if (sqrtf(d.x * d.x + d.y * d.y + d.z * d.z) < 0.001f) {
-            g_push[i].p = vec3_make(x, y, z); g_push[i].r = radius; g_push[i].t = ahora;
-            return;
+            g_push[i].a = a; g_push[i].b = b; g_push[i].r = radius; g_push[i].t = ahora;
+            return g_push_hit[i];
         }
     }
     if (g_push_n < MAX_PUSH) {
-        g_push[g_push_n].p = vec3_make(x, y, z);
+        g_push[g_push_n].a = a;
+        g_push[g_push_n].b = b;
         g_push[g_push_n].r = radius;
         g_push[g_push_n].t = ahora;
+        g_push_hit[g_push_n] = 0;
         g_push_n++;
     }
+    return 0;
+}
+
+int g3d_cloth_push(float x, float y, float z, float radius) {
+    return g3d_cloth_push_capsule(x, y, z, x, y, z, radius);   // una esfera
 }
 
 /* Se quedan los de este frame (60 ms de margen); los demas se caen de la lista. */
@@ -66,7 +83,7 @@ static void push_caducar(void) {
     Uint32 ahora = SDL_GetTicks();
     int j = 0;
     for (int i = 0; i < g_push_n; i++)
-        if (ahora - g_push[i].t <= 60) g_push[j++] = g_push[i];
+        if (ahora - g_push[i].t <= 60) { g_push_hit[j] = g_push_hit[i]; g_push[j++] = g_push[i]; }
     g_push_n = j;
 }
 
@@ -224,13 +241,28 @@ void g3d_cloth_update(int cloth, float dt) {
     /* los empujones de este frame: los aparta igual que el collider propio */
     push_caducar();
     for (int e = 0; e < g_push_n; e++) {
+        int tocadas = 0;
+        Vec3 ab = vec3_sub(g_push[e].b, g_push[e].a);
+        float ab2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
         for (int k = 0; k < np; k++) {
             if (c->pinned[k]) continue;
-            Vec3 d = vec3_sub(c->pos[k], g_push[e].p);
+            /* el punto de la capsula mas cercano a esta particula */
+            Vec3 cen = g_push[e].a;
+            if (ab2 > 1e-8f) {
+                Vec3 ap = vec3_sub(c->pos[k], g_push[e].a);
+                float t2 = (ap.x * ab.x + ap.y * ab.y + ap.z * ab.z) / ab2;
+                if (t2 < 0.0f) t2 = 0.0f;
+                if (t2 > 1.0f) t2 = 1.0f;
+                cen = vec3_add(g_push[e].a, vec3_scale(ab, t2));
+            }
+            Vec3 d = vec3_sub(c->pos[k], cen);
             float len = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
-            if (len < g_push[e].r && len > 1e-5f)
-                c->pos[k] = vec3_add(g_push[e].p, vec3_scale(d, g_push[e].r / len));
+            if (len < g_push[e].r && len > 1e-5f) {
+                c->pos[k] = vec3_add(cen, vec3_scale(d, g_push[e].r / len));
+                tocadas++;
+            }
         }
+        g_push_hit[e] = tocadas;   // lo lee quien empuja, para saber que toca tela
     }
     if (c->hasCol) {
         for (int k = 0; k < np; k++) {
