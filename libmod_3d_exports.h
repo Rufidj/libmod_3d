@@ -43,6 +43,8 @@ DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
        maneja con las locales de siempre -- 'wind' la fuerza y target_x/y/z hacia
        donde sopla, igual que la vegetacion usa 'wind'. */
     {"C3D_CLOTH",               TYPE_QWORD, 7},
+    /* Una CUERDA: el proceso ES la cuerda, con 'wind' y target_x/y/z igual que la tela */
+    {"C3D_ROPE",                TYPE_QWORD, 8},
     {"G3D_SPRITE_UPRIGHT",      TYPE_QWORD, 0},   /* de pie (personajes) */
     {"G3D_SPRITE_FACING",       TYPE_QWORD, 1},   /* de cara del todo (items, efectos) */
 
@@ -361,6 +363,16 @@ int64_t g3d_cloth_set_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_update_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_push_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_push_capsule_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_cloth_pin_move_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_pin_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_pin_move_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_set_texture_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_points_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_rope_destroy_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_add_river_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_texture_bgd(INSTANCE *my, int64_t *params);
@@ -783,6 +795,17 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     /* empujon global: lo llama quien deba apartar las telas, una vez por frame */
     FUNC("G3D_CLOTH_PUSH", "FFFF", TYPE_INT, g3d_cloth_push_bgd),
     FUNC("G3D_CLOTH_PUSH_CAPSULE", "FFFFFFF", TYPE_INT, g3d_cloth_push_capsule_bgd),
+    FUNC("G3D_CLOTH_PIN_MOVE", "IIIFFF", TYPE_INT, g3d_cloth_pin_move_bgd),
+    /* ---- cuerdas: la tela en una dimension, dibujada como tubo ---- */
+    FUNC("G3D_ROPE_CREATE", "FFFFFFIFF", TYPE_INT, g3d_rope_create_bgd),
+    FUNC("G3D_ROPE_PIN", "III", TYPE_INT, g3d_rope_pin_bgd),
+    FUNC("G3D_ROPE_PIN_MOVE", "IIFFF", TYPE_INT, g3d_rope_pin_move_bgd),
+    FUNC("G3D_ROPE_SET_TEXTURE", "II", TYPE_INT, g3d_rope_set_texture_bgd),
+    FUNC("G3D_ROPE_POINTS", "I", TYPE_INT, g3d_rope_points_bgd),
+    FUNC("G3D_ROPE_X", "II", TYPE_FLOAT, g3d_rope_x_bgd),
+    FUNC("G3D_ROPE_Y", "II", TYPE_FLOAT, g3d_rope_y_bgd),
+    FUNC("G3D_ROPE_Z", "II", TYPE_FLOAT, g3d_rope_z_bgd),
+    FUNC("G3D_ROPE_DESTROY", "I", TYPE_INT, g3d_rope_destroy_bgd),
     FUNC("G3D_FLOW_ADD", "FFFFFFFFF", TYPE_INT, g3d_flow_add_bgd),
     FUNC("G3D_FLOW_ADD_RIVER", "IFFFFFFFF", TYPE_INT, g3d_flow_add_river_bgd),
     FUNC("G3D_FLOW_SET_TEXTURE", "I", TYPE_INT, g3d_flow_set_texture_bgd),

@@ -119,6 +119,7 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_scenefile.c
     libmod_3d_pick.c
     libmod_3d_cloth.c
+    libmod_3d_rope.c
     libmod_3d_chunkterrain.c
     libmod_3d_fluidfill.c
     libmod_3d_watersim.c

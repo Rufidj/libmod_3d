@@ -42,6 +42,12 @@ void g3d_cloth_set_texture(int cloth, unsigned int gl_handle);
 void g3d_cloth_update(int cloth, float dt);
 
 void g3d_cloth_shutdown(void);
+/* Mueve UNA sujecion de la tela: es lo que permite colgarla de una cuerda que se
+   mueve (cada frame se le dice donde esta ese punto de la cuerda). */
+void g3d_cloth_pin_move(int cloth, int i, int j, float x, float y, float z);
+/* Compartido con las cuerdas: aparta un punto de los empujones de este frame. */
+int  g3d_push_apply(float *x, float *y, float *z);
+void g3d_push_caducar(void);
 
 #ifdef __cplusplus
 }

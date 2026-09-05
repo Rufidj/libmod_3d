@@ -43,6 +43,7 @@
 #include "libmod_3d_pick.h"
 #include "libmod_3d_paint.h"
 #include "libmod_3d_cloth.h"
+#include "libmod_3d_rope.h"
 #include "libmod_3d_sprite.h"
 
 #include <SDL.h>
@@ -2133,6 +2134,47 @@ int64_t g3d_cloth_set_texture_bgd(INSTANCE *my, int64_t *params) {
     g3d_cloth_set_texture((int)params[0], t ? t->gl_handle : 0);
     return 1;
 }
+int64_t g3d_rope_create_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rope_create(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
+                           *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
+                           (int)params[6], *(float *)&params[7], *(float *)&params[8]);
+}
+int64_t g3d_rope_pin_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rope_pin((int)params[0], (int)params[1], (int)params[2]); return 1;
+}
+int64_t g3d_rope_pin_move_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rope_pin_move((int)params[0], (int)params[1],
+                      *(float *)&params[2], *(float *)&params[3], *(float *)&params[4]);
+    return 1;
+}
+int64_t g3d_rope_set_texture_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rope_set_texture((int)params[0], (unsigned int)params[1]); return 1;
+}
+int64_t g3d_rope_points_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_rope_points((int)params[0]);
+}
+/* Donde esta un punto de la cuerda. Se devuelve un eje por llamada, que es como
+   se leen las cosas desde BennuGD2 sin punteros. */
+int64_t g3d_rope_x_bgd(INSTANCE *my, int64_t *params) {
+    float x = 0, y = 0, z = 0; g3d_rope_point((int)params[0], (int)params[1], &x, &y, &z);
+    return (int64_t)*(int32_t *)&x;
+}
+int64_t g3d_rope_y_bgd(INSTANCE *my, int64_t *params) {
+    float x = 0, y = 0, z = 0; g3d_rope_point((int)params[0], (int)params[1], &x, &y, &z);
+    return (int64_t)*(int32_t *)&y;
+}
+int64_t g3d_rope_z_bgd(INSTANCE *my, int64_t *params) {
+    float x = 0, y = 0, z = 0; g3d_rope_point((int)params[0], (int)params[1], &x, &y, &z);
+    return (int64_t)*(int32_t *)&z;
+}
+int64_t g3d_rope_destroy_bgd(INSTANCE *my, int64_t *params) {
+    g3d_rope_destroy((int)params[0]); return 1;
+}
+int64_t g3d_cloth_pin_move_bgd(INSTANCE *my, int64_t *params) {
+    g3d_cloth_pin_move((int)params[0], (int)params[1], (int)params[2],
+                       *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+    return 1;
+}
 int64_t g3d_cloth_push_capsule_bgd(INSTANCE *my, int64_t *params) {
     return g3d_cloth_push_capsule(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
                                   *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
@@ -2796,6 +2838,29 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
                     ultimo = ahora;
                 }
                 g3d_cloth_update( entity_id, paso );
+            }
+            break;
+        }
+
+        case 8: { /* C3D_ROPE: el proceso ES la cuerda */
+            g3d_rope_set_wind( entity_id,
+                               (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_X ),
+                               (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_Y ),
+                               (float) LOCDOUBLE( libmod_3d, i, LOC3D_TARGET_Z ),
+                               (float) LOCDOUBLE( libmod_3d, i, LOC3D_WIND ) );
+            {   /* el mismo paso de tiempo que las telas: medido aqui, una vez por frame */
+                static Uint32 ultimo = 0;
+                static float  paso   = 1.0f / 60.0f;
+                Uint32 ahora = SDL_GetTicks();
+                if ( ahora != ultimo ) {
+                    if ( ultimo ) {
+                        paso = ( ahora - ultimo ) / 1000.0f;
+                        if ( paso > 0.05f ) paso = 0.05f;
+                        if ( paso <= 0.0f ) paso = 1.0f / 60.0f;
+                    }
+                    ultimo = ahora;
+                }
+                g3d_rope_update( entity_id, paso );
             }
             break;
         }

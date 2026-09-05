@@ -78,8 +78,37 @@ int g3d_cloth_push(float x, float y, float z, float radius) {
     return g3d_cloth_push_capsule(x, y, z, x, y, z, radius);   // una esfera
 }
 
+/* Aparta un punto de todos los empujones de este frame. Devuelve 1 si lo movio.
+   Lo usan las telas y las CUERDAS: el mismo barril que abre una cortina tiene que
+   apartar una cuerda tendida, y no tiene sentido tener dos listas. */
+int g3d_push_apply(float *x, float *y, float *z) {
+    int movido = 0;
+    for (int e = 0; e < g_push_n; e++) {
+        Vec3 ab = vec3_sub(g_push[e].b, g_push[e].a);
+        float ab2 = ab.x * ab.x + ab.y * ab.y + ab.z * ab.z;
+        Vec3 p = vec3_make(*x, *y, *z);
+        Vec3 cen = g_push[e].a;
+        if (ab2 > 1e-8f) {
+            Vec3 ap = vec3_sub(p, g_push[e].a);
+            float t = (ap.x * ab.x + ap.y * ab.y + ap.z * ab.z) / ab2;
+            if (t < 0.0f) t = 0.0f;
+            if (t > 1.0f) t = 1.0f;
+            cen = vec3_add(g_push[e].a, vec3_scale(ab, t));
+        }
+        Vec3 d = vec3_sub(p, cen);
+        float len = sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
+        if (len < g_push[e].r && len > 1e-5f) {
+            Vec3 np2 = vec3_add(cen, vec3_scale(d, g_push[e].r / len));
+            *x = np2.x; *y = np2.y; *z = np2.z;
+            g_push_hit[e]++;
+            movido = 1;
+        }
+    }
+    return movido;
+}
+
 /* Se quedan los de este frame (60 ms de margen); los demas se caen de la lista. */
-static void push_caducar(void) {
+void g3d_push_caducar(void) {
     Uint32 ahora = SDL_GetTicks();
     int j = 0;
     for (int i = 0; i < g_push_n; i++)
@@ -176,6 +205,13 @@ void g3d_cloth_set_collider(int cloth, float x, float y, float z, float radius) 
     Cloth *c = get(cloth); if (!c) return;
     c->colPos = vec3_make(x, y, z); c->colR = radius; c->hasCol = 1;
 }
+void g3d_cloth_pin_move(int cloth, int i, int j, float x, float y, float z) {
+    Cloth *c = get(cloth); if (!c) return;
+    if (i < 0 || j < 0 || i >= c->nx || j >= c->ny) return;
+    int k = IDX(c, i, j);
+    c->pinned[k] = 1;
+    c->pinPos[k] = vec3_make(x, y, z);
+}
 void g3d_cloth_clear_collider(int cloth) { Cloth *c = get(cloth); if (c) c->hasCol = 0; }
 
 void g3d_cloth_set_texture(int cloth, unsigned int gl_handle) {
@@ -239,7 +275,7 @@ void g3d_cloth_update(int cloth, float dt) {
 
     /* Sphere collision (the character) */
     /* los empujones de este frame: los aparta igual que el collider propio */
-    push_caducar();
+    g3d_push_caducar();
     for (int e = 0; e < g_push_n; e++) {
         int tocadas = 0;
         Vec3 ab = vec3_sub(g_push[e].b, g_push[e].a);
