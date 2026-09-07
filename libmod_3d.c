@@ -2113,6 +2113,13 @@ int64_t g3d_cloth_create_bgd(INSTANCE *my, int64_t *params) {
     float px = *(float *)&params[4], py = *(float *)&params[5], pz = *(float *)&params[6];
     return g3d_cloth_create(w, h, nx, ny, px, py, pz);
 }
+int64_t g3d_cloth_create_oriented_bgd(INSTANCE *my, int64_t *params) {
+    float w = *(float *)&params[0], h = *(float *)&params[1];
+    int nx = (int)params[2], ny = (int)params[3];
+    float px = *(float *)&params[4], py = *(float *)&params[5], pz = *(float *)&params[6];
+    float dirx = *(float *)&params[7], dirz = *(float *)&params[8];
+    return g3d_cloth_create_oriented(w, h, nx, ny, px, py, pz, dirx, dirz);
+}
 int64_t g3d_cloth_pin_bgd(INSTANCE *my, int64_t *params) {
     g3d_cloth_pin((int)params[0], (int)params[1]); return 1;
 }

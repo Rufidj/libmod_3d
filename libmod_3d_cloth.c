@@ -120,6 +120,17 @@ static inline int IDX(Cloth *c, int i, int j) { return i + j * c->nx; }
 
 int g3d_cloth_create(float width, float height, int nx, int ny,
                      float px, float py, float pz) {
+    return g3d_cloth_create_oriented(width, height, nx, ny, px, py, pz, 1.0f, 0.0f);
+}
+
+/* Igual que g3d_cloth_create, pero la tela no tiene por que colgar a lo largo
+   del eje X del mundo: (dirx,dirz) es hacia donde apunta su "ancho" (horizontal,
+   perpendicular a como cuelga). Es lo que hace falta para clavar una tela en una
+   pared que no mira hacia X -- una bandera en la fachada de una casa girada, por
+   ejemplo. Con (1,0) es exactamente la de siempre. */
+int g3d_cloth_create_oriented(float width, float height, int nx, int ny,
+                              float px, float py, float pz,
+                              float dirx, float dirz) {
     if (nx < 2) nx = 2; if (ny < 2) ny = 2;
     int id = -1;
     for (int k = 0; k < MAX_CLOTHS; k++) if (!g_cloths[k].active) { id = k; break; }
@@ -131,6 +142,9 @@ int g3d_cloth_create(float width, float height, int nx, int ny,
     c->diag = sqrtf(c->dx * c->dx + c->dy * c->dy);
     c->gravity = 9.8f; c->damp = 0.99f;
 
+    float dlen = sqrtf(dirx * dirx + dirz * dirz);
+    if (dlen < 1e-5f) { dirx = 1.0f; dirz = 0.0f; } else { dirx /= dlen; dirz /= dlen; }
+
     int np = nx * ny;
     c->pos = (Vec3 *)malloc(np * sizeof(Vec3));
     c->prev = (Vec3 *)malloc(np * sizeof(Vec3));
@@ -138,7 +152,8 @@ int g3d_cloth_create(float width, float height, int nx, int ny,
     c->pinned = (unsigned char *)calloc(np, 1);
     for (int j = 0; j < ny; j++)
         for (int i = 0; i < nx; i++) {
-            Vec3 p = vec3_make(px + i * c->dx, py - j * c->dy, pz);
+            float w = i * c->dx;
+            Vec3 p = vec3_make(px + w * dirx, py - j * c->dy, pz + w * dirz);
             int k = IDX(c, i, j);
             c->pos[k] = c->prev[k] = c->pinPos[k] = p;
         }

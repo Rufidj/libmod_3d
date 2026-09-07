@@ -19,6 +19,12 @@ extern "C" {
    in the active scene. Returns a cloth id, or -1. */
 int g3d_cloth_create(float width, float height, int nx, int ny,
                      float px, float py, float pz);
+/* Same, but the cloth's width axis points along (dirx,dirz) in the XZ plane
+   instead of always +X -- needed to hang a cloth flat against a wall that
+   doesn't face world X (a banner on a rotated building facade). */
+int g3d_cloth_create_oriented(float width, float height, int nx, int ny,
+                              float px, float py, float pz,
+                              float dirx, float dirz);
 
 /* Pin mode: 0 = top edge, 1 = top corners, 2 = left edge (flag). */
 void g3d_cloth_pin(int cloth, int mode);

@@ -355,6 +355,7 @@ int64_t g3d_terrain_paint_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_paint_get_texture_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_paint_save_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_cloth_create_oriented_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_pin_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_set_wind_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_cloth_set_collider_bgd(INSTANCE *my, int64_t *params);
@@ -789,6 +790,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_PAINT_GET_TEXTURE", "I", TYPE_INT, g3d_paint_get_texture_bgd),
     FUNC("G3D_PAINT_SAVE", "IS", TYPE_INT, g3d_paint_save_bgd),
     FUNC("G3D_CLOTH_CREATE", "FFIIFFF", TYPE_INT, g3d_cloth_create_bgd),
+    FUNC("G3D_CLOTH_CREATE_ORIENTED", "FFIIFFFFF", TYPE_INT, g3d_cloth_create_oriented_bgd),
     FUNC("G3D_CLOTH_PIN", "II", TYPE_INT, g3d_cloth_pin_bgd),
     FUNC("G3D_CLOTH_SET_WIND", "IFFFF", TYPE_INT, g3d_cloth_set_wind_bgd),
     FUNC("G3D_CLOTH_SET_COLLIDER", "IFFFF", TYPE_INT, g3d_cloth_set_collider_bgd),
