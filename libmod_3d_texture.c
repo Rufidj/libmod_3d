@@ -47,8 +47,15 @@ static G3DTexture *surface_to_g3d(SDL_Surface *surface, const char *name) {
     texture->height = surface->h;
     texture->channels = surface->format->BytesPerPixel;
 
-    /* Copy pixel data (convert to RGBA if needed) */
+    /* Copy pixel data (convert to RGBA if needed). Walk rows using surface->pitch,
+       not width*BytesPerPixel -- SDL pads each row's pitch up to a 4-byte
+       boundary (e.g. a 413px-wide RGB24 row is 1239 bytes but the pitch is
+       1240), so a linear walk of surface->pixels drifts by that padding on
+       every row and smears the channels together over the image. This only
+       bites odd-sized 3-byte-per-pixel (JPEG) surfaces since 4-byte-per-pixel
+       ones are always already aligned. */
     uint32_t pixel_count = texture->width * texture->height;
+    int pitch = surface->pitch;
 
     if (texture->channels == 3) {
         /* RGB -> RGBA conversion */
@@ -56,38 +63,47 @@ static G3DTexture *surface_to_g3d(SDL_Surface *surface, const char *name) {
         texture->data_size = pixel_count * 4;
         texture->data = (uint8_t *)malloc(texture->data_size);
 
-        uint8_t *src = (uint8_t *)surface->pixels;
         uint8_t *dst = texture->data;
 
-        for (uint32_t i = 0; i < pixel_count; i++) {
-            dst[0] = src[0];  /* R */
-            dst[1] = src[1];  /* G */
-            dst[2] = src[2];  /* B */
-            dst[3] = 255;     /* A */
+        for (uint32_t y = 0; y < texture->height; y++) {
+            uint8_t *src = (uint8_t *)surface->pixels + (size_t)y * pitch;
+            for (uint32_t x = 0; x < texture->width; x++) {
+                dst[0] = src[0];  /* R */
+                dst[1] = src[1];  /* G */
+                dst[2] = src[2];  /* B */
+                dst[3] = 255;     /* A */
 
-            src += 3;
-            dst += 4;
+                src += 3;
+                dst += 4;
+            }
         }
     } else if (texture->channels == 4) {
-        /* RGBA direct copy */
+        /* RGBA copy, row by row (pitch may still exceed width*4 in principle) */
         texture->data_size = pixel_count * 4;
         texture->data = (uint8_t *)malloc(texture->data_size);
-        memcpy(texture->data, surface->pixels, texture->data_size);
+
+        for (uint32_t y = 0; y < texture->height; y++) {
+            memcpy(texture->data + (size_t)y * texture->width * 4,
+                   (uint8_t *)surface->pixels + (size_t)y * pitch,
+                   (size_t)texture->width * 4);
+        }
     } else if (texture->channels == 1) {
         /* Grayscale -> RGBA */
         texture->channels = 4;
         texture->data_size = pixel_count * 4;
         texture->data = (uint8_t *)malloc(texture->data_size);
 
-        uint8_t *src = (uint8_t *)surface->pixels;
         uint8_t *dst = texture->data;
 
-        for (uint32_t i = 0; i < pixel_count; i++) {
-            dst[0] = dst[1] = dst[2] = src[0];  /* Gray → RGB */
-            dst[3] = 255;                        /* A */
+        for (uint32_t y = 0; y < texture->height; y++) {
+            uint8_t *src = (uint8_t *)surface->pixels + (size_t)y * pitch;
+            for (uint32_t x = 0; x < texture->width; x++) {
+                dst[0] = dst[1] = dst[2] = src[0];  /* Gray → RGB */
+                dst[3] = 255;                        /* A */
 
-            src += 1;
-            dst += 4;
+                src += 1;
+                dst += 4;
+            }
         }
     } else {
         fprintf(stderr, "G3D: Unsupported texture format (channels=%d)\n",
