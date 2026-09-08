@@ -291,11 +291,15 @@ int g3d_sprite_direction(int id, float angle_rad, int ndirs, G3DCamera *camera) 
 
 #ifndef VITA
 /* Dibuja todos los sprites con el shader ya activo. */
-/* Cuanta luz hay en la escena: la ambiental mas el sol (las direccionales). Un
-   billboard no tiene normal de verdad, asi que se le aplica plano -- es lo que
-   hacen los juegos HD-2D -- pero asi el personaje se apaga de noche con el ciclo
-   de dia, en vez de quedarse brillando como una pegatina. */
-static Vec3 luz_de_la_escena(void) {
+/* Cuanta luz hay en un punto: la ambiental, el sol (las direccionales) y
+   ahora tambien las antorchas/focos cercanas (punto/foco) -- antes solo
+   contaba el sol, asi que una antorcha de verdad no alumbraba a los
+   personajes HD-2D aunque si alumbrara a los objetos 3D normales. Un
+   billboard no tiene normal de verdad, asi que se le aplica plano -- es lo
+   que hacen los juegos HD-2D -- pero asi el personaje se apaga de noche con
+   el ciclo de dia (o se enciende junto a una antorcha), en vez de quedarse
+   brillando como una pegatina. */
+static Vec3 luz_de_la_escena(Vec3 pos) {
     Vec3 luz;
     float amb[3] = { 0.0f, 0.0f, 0.0f }, ai = 0.0f;
     g3d_renderer_get_ambient(amb, &ai);
@@ -305,10 +309,36 @@ static Vec3 luz_de_la_escena(void) {
         int n = 0, *ids = g3d_light_impl_get_all(&n), i;
         for (i = 0; i < n; i++) {
             G3DLight *l = g3d_light_impl_get(ids[i]);
-            if (!l || !l->active || l->type != 0) continue;   /* solo el sol */
-            luz.x += l->color[0] * l->intensity * 0.70f;
-            luz.y += l->color[1] * l->intensity * 0.70f;
-            luz.z += l->color[2] * l->intensity * 0.70f;
+            if (!l || !l->active) continue;
+            if (l->type == 0) {   /* el sol: no depende de donde este el sprite */
+                luz.x += l->color[0] * l->intensity * 0.70f;
+                luz.y += l->color[1] * l->intensity * 0.70f;
+                luz.z += l->color[2] * l->intensity * 0.70f;
+                continue;
+            }
+            /* punto o foco: se apaga con la distancia, igual que en los
+               objetos 3D normales (mismo att = (1 - dist/alcance)^2). */
+            Vec3 toL = vec3_sub(l->position, pos);
+            float dist = sqrtf(toL.x * toL.x + toL.y * toL.y + toL.z * toL.z);
+            float range = (l->range > 0.01f) ? l->range : 20.0f;
+            float att = 1.0f - dist / range;
+            if (att <= 0.0f) continue;
+            att = att * att;
+            if (l->type == 2 && dist > 0.0001f) {   /* foco: tambien el cono */
+                Vec3 dir = vec3_normalize(l->direction);
+                Vec3 toLn = vec3_scale(toL, 1.0f / dist);
+                float theta = -(dir.x * toLn.x + dir.y * toLn.y + dir.z * toLn.z);
+                float outer = (l->cone_angle > 0.5f) ? l->cone_angle : 40.0f;
+                float cos_out = cosf(outer * 0.5f * 3.14159265f / 180.0f);
+                float cos_in = cosf(outer * 0.5f * 0.75f * 3.14159265f / 180.0f);
+                float spotF = (theta - cos_out) / fmaxf(cos_in - cos_out, 0.0001f);
+                if (spotF < 0.0f) spotF = 0.0f; if (spotF > 1.0f) spotF = 1.0f;
+                att *= spotF;
+                if (att <= 0.0f) continue;
+            }
+            luz.x += l->color[0] * l->intensity * att * 0.70f;
+            luz.y += l->color[1] * l->intensity * att * 0.70f;
+            luz.z += l->color[2] * l->intensity * att * 0.70f;
         }
     }
     /* Tope en 1: con un dia normal el sprite sale con SU color (no lavado) y solo
@@ -359,7 +389,7 @@ static void draw_all(G3DShaderProgram *sh, Mat4 vp, Vec3 right, Vec3 up,
         g3d_shader_set_float(sh, "uCutout", s->cutout);
         if (!only_shadow) {
             g3d_shader_set_vec4(sh, "uTint", vec4_make(s->r, s->g, s->b, s->a));
-            g3d_shader_set_vec3(sh, "uLuz", s->lit ? luz_de_la_escena()
+            g3d_shader_set_vec3(sh, "uLuz", s->lit ? luz_de_la_escena(vec3_make(s->x, s->y, s->z))
                                                    : vec3_make(1.0f, 1.0f, 1.0f));
         }
         glBindSampler(0, s->smooth ? g_smp_linear : g_smp_nearest);
