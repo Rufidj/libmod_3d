@@ -47,6 +47,10 @@ void g3d_cloth_set_texture(int cloth, unsigned int gl_handle);
 /* Step the simulation by dt seconds and re-upload the mesh. */
 void g3d_cloth_update(int cloth, float dt);
 
+/* Quita una tela del mundo (y de la escena): sin esto, borrarla en el editor
+   no la hacia desaparecer -- se quedaba pintada y quieta hasta reiniciar. */
+void g3d_cloth_destroy(int cloth);
+
 void g3d_cloth_shutdown(void);
 /* Mueve UNA sujecion de la tela: es lo que permite colgarla de una cuerda que se
    mueve (cada frame se le dice donde esta ese punto de la cuerda). */

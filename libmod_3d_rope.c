@@ -318,6 +318,10 @@ void g3d_rope_update(int rope, float dt) {
 
 void g3d_rope_destroy(int rope) {
     Rope *r = get(rope); if (!r) return;
+    /* Sin esto la cuerda dejaba de simularse pero se quedaba pintada y quieta
+       en la escena para siempre -- borrarla en el editor no la hacia
+       desaparecer hasta reiniciar. */
+    g3d_entity_impl_destroy(r->entity);
     free(r->pos); free(r->prev); free(r->pinPos); free(r->pinned); free(r->carga);
     r->active = 0;
 }

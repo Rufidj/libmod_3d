@@ -343,11 +343,16 @@ void g3d_cloth_update(int cloth, float dt) {
     g3d_mesh_update_gpu(c->mesh);
 }
 
+/* Quita una tela del mundo: la saca de la escena (si no, se queda pintada y
+   quieta para siempre aunque el editor la de por borrada) y libera lo suyo. */
+void g3d_cloth_destroy(int cloth) {
+    Cloth *c = get(cloth); if (!c) return;
+    g3d_entity_impl_destroy(c->entity);
+    free(c->pos); free(c->prev); free(c->pinPos); free(c->pinned);
+    c->active = 0;
+}
+
 void g3d_cloth_shutdown(void) {
-    for (int k = 0; k < MAX_CLOTHS; k++) {
-        Cloth *c = &g_cloths[k];
-        if (!c->active) continue;
-        free(c->pos); free(c->prev); free(c->pinPos); free(c->pinned);
-        c->active = 0;
-    }
+    for (int k = 0; k < MAX_CLOTHS; k++)
+        if (g_cloths[k].active) g3d_cloth_destroy(k);
 }
