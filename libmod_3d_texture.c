@@ -29,6 +29,21 @@
 static G3DTexture *surface_to_g3d(SDL_Surface *surface, const char *name) {
     if (!surface) return NULL;
 
+    /* Una PNG con paleta (8 bits, "indexada") decodifica con BytesPerPixel=1,
+       igual que una en escala de grises -- pero ese byte no es un nivel de
+       gris, es el INDICE de un color en la paleta. Tratado como gris (lo que
+       hace el resto de esta funcion para channels==1), una paleta con pocos
+       colores (indices bajos, 0..40 por ejemplo) sale casi negra sea cual sea
+       el color real que apunte cada indice. Se convierte a RGBA primero, que
+       ya resuelve la paleta a colores de verdad, y el resto de la funcion
+       trabaja igual que con cualquier PNG/JPG sin paleta. */
+    if (surface->format->palette) {
+        SDL_Surface *conv = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_ABGR8888, 0);
+        SDL_FreeSurface(surface);
+        if (!conv) return NULL;
+        surface = conv;
+    }
+
     G3DTexture *texture = (G3DTexture *)malloc(sizeof(G3DTexture));
     if (!texture) {
         SDL_FreeSurface(surface);
