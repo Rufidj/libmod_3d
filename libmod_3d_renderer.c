@@ -1572,10 +1572,30 @@ static void draw_scene_entities(G3DCamera *camera, int *entities, int entity_cou
            Same global g3d_set_lod distance as instanced objects; no game code. */
         void *drawmesh = entity->mesh;
         if (!node_animated && lodd > 0.0f && !entity->lod_exempt) {
-            float ex = world_matrix.m[12] - camera->position.x;
-            float ey = world_matrix.m[13] - camera->position.y;
-            float ez = world_matrix.m[14] - camera->position.z;
-            if (ex*ex + ey*ey + ez*ez > lodd * lodd)
+            /* La distancia es a la CAJA de la malla, no al origen de la entidad: un trozo grande (un circuito, un mapa) tiene
+               su origen lejos de casi toda su geometria, y medir hasta el origen le ponia la version simplificada (cascos de
+               triangulos enormes) aunque la camara estuviera pegada a ella. Se cuenta la distancia al centro menos el radio. */
+            const G3DMesh *em = (const G3DMesh *)entity->mesh;
+            float lcx = 0.0f, lcy = 0.0f, lcz = 0.0f, rad = 0.0f;
+            if (em) {
+                lcx = (em->aabb_min[0] + em->aabb_max[0]) * 0.5f; lcy = (em->aabb_min[1] + em->aabb_max[1]) * 0.5f; lcz = (em->aabb_min[2] + em->aabb_max[2]) * 0.5f;
+                float hx = (em->aabb_max[0] - em->aabb_min[0]) * 0.5f, hy = (em->aabb_max[1] - em->aabb_min[1]) * 0.5f, hz = (em->aabb_max[2] - em->aabb_min[2]) * 0.5f;
+                float sx = sqrtf(world_matrix.m[0]*world_matrix.m[0] + world_matrix.m[1]*world_matrix.m[1] + world_matrix.m[2]*world_matrix.m[2]);
+                float sy = sqrtf(world_matrix.m[4]*world_matrix.m[4] + world_matrix.m[5]*world_matrix.m[5] + world_matrix.m[6]*world_matrix.m[6]);
+                float sz = sqrtf(world_matrix.m[8]*world_matrix.m[8] + world_matrix.m[9]*world_matrix.m[9] + world_matrix.m[10]*world_matrix.m[10]);
+                float sm = sx > sy ? sx : sy; if (sz > sm) sm = sz;
+                rad = sqrtf(hx*hx + hy*hy + hz*hz) * sm;
+            }
+            float wcx = world_matrix.m[0]*lcx + world_matrix.m[4]*lcy + world_matrix.m[8]*lcz  + world_matrix.m[12];
+            float wcy = world_matrix.m[1]*lcx + world_matrix.m[5]*lcy + world_matrix.m[9]*lcz  + world_matrix.m[13];
+            float wcz = world_matrix.m[2]*lcx + world_matrix.m[6]*lcy + world_matrix.m[10]*lcz + world_matrix.m[14];
+            float ex = wcx - camera->position.x;
+            float ey = wcy - camera->position.y;
+            float ez = wcz - camera->position.z;
+            float dist = sqrtf(ex*ex + ey*ey + ez*ez) - rad;
+            /* Las mallas GRANDES (un trozo de circuito o de mapa) no se simplifican nunca: la version de baja poligonizacion
+               (rejilla de 12 celdas) las deja hechas cascos de triangulos enormes y, para lo que mide, el ahorro es poco. */
+            if (dist > lodd && rad <= lodd * 0.25f)
                 drawmesh = g3d_mesh_lod((G3DMesh *)entity->mesh);
         }
 
