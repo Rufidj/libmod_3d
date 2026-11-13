@@ -35,6 +35,7 @@ typedef struct {
     int   visible;
     int   scene;
     float x, y, z;
+    float ox, oy, oz, oyaw;       /* origen y giro (radianes, eje Y) del grupo (mapa colocado en el mundo): x,y,z se giran y se suman al dibujar */
     unsigned int tex;
     int   px_w, px_h;             /* tamano del grafico ENTERO, en pixeles */
     float uscale, vscale;         /* por si la textura viene rellenada a potencia de dos */
@@ -55,6 +56,13 @@ typedef struct {
 } Sprite;
 
 static Sprite g_spr[SPRITE_MAX];
+static float g_spr_org[4] = { 0, 0, 0, 0 };   /* origen y giro que reciben los sprites que se creen ahora (ver g3d_sprite_set_origin) */
+void g3d_sprite_set_origin(float x, float y, float z, float yaw) { g_spr_org[0] = x; g_spr_org[1] = y; g_spr_org[2] = z; g_spr_org[3] = yaw; }
+/* posicion en el mundo de un sprite (con el origen y el giro de su grupo) */
+static void spr_world(const Sprite *s, float *wx, float *wy, float *wz) {
+    float c = cosf(s->oyaw), n = sinf(s->oyaw);
+    *wx = s->ox + s->x * c + s->z * n; *wy = s->oy + s->y; *wz = s->oz - s->x * n + s->z * c;
+}
 static int    g_spr_top = 0;      /* uno mas alto que el ultimo usado */
 static int    g_spr_n   = 0;
 
@@ -151,6 +159,7 @@ int g3d_sprite_create(int scene_id, float x, float y, float z) {
         memset(s, 0, sizeof(*s));
         s->used = 1; s->visible = 1; s->scene = scene_id;
         s->x = x; s->y = y; s->z = z;
+        s->ox = g_spr_org[0]; s->oy = g_spr_org[1]; s->oz = g_spr_org[2]; s->oyaw = g_spr_org[3];
         s->anchor_x = 0.5f; s->anchor_y = 1.0f;   /* los pies en x,y,z */
         s->billboard = G3D_SPRITE_CYLINDRICAL;
         s->cutout = 0.5f;
@@ -275,8 +284,9 @@ int g3d_sprite_direction(int id, float angle_rad, int ndirs, G3DCamera *camera) 
     if (!s || !camera || ndirs <= 0) return 0;
     /* Rumbo de la camara hacia el sprite, en el mismo convenio que usa el motor
        para 'angle': 0 = +Z y girando hacia +X. */
-    float vx = s->x - camera->position.x;
-    float vz = s->z - camera->position.z;
+    float wx_, wy_, wz_; spr_world(s, &wx_, &wy_, &wz_);
+    float vx = wx_ - camera->position.x;
+    float vz = wz_ - camera->position.z;
     float camh = atan2f(vx, vz);
     float twopi = (float)(2.0 * M_PI);
     /* rel = 0 cuando el sprite mira hacia la camara -> postura 0 = de frente */
@@ -364,7 +374,8 @@ static void draw_all(G3DShaderProgram *sh, Mat4 vp, Vec3 right, Vec3 up,
         if (only_shadow && !s->shadow) continue;
         if (billboard_filter >= 0 && s->billboard != billboard_filter) continue;
         float w, h; sprite_size(s, &w, &h);
-        g3d_shader_set_vec3(sh, "uCenter", vec3_make(s->x, s->y, s->z));
+        float wcx_, wcy_, wcz_; spr_world(s, &wcx_, &wcy_, &wcz_);
+        g3d_shader_set_vec3(sh, "uCenter", vec3_make(wcx_, wcy_, wcz_));
         g3d_shader_set_vec2(sh, "uSize", w, h);
         g3d_shader_set_vec2(sh, "uAnchor", s->anchor_x, s->anchor_y);
         {   /* recorte del fotograma -> coordenadas de textura */
@@ -389,7 +400,7 @@ static void draw_all(G3DShaderProgram *sh, Mat4 vp, Vec3 right, Vec3 up,
         g3d_shader_set_float(sh, "uCutout", s->cutout);
         if (!only_shadow) {
             g3d_shader_set_vec4(sh, "uTint", vec4_make(s->r, s->g, s->b, s->a));
-            g3d_shader_set_vec3(sh, "uLuz", s->lit ? luz_de_la_escena(vec3_make(s->x, s->y, s->z))
+            g3d_shader_set_vec3(sh, "uLuz", s->lit ? luz_de_la_escena(vec3_make(wcx_, wcy_, wcz_))
                                                    : vec3_make(1.0f, 1.0f, 1.0f));
         }
         glBindSampler(0, s->smooth ? g_smp_linear : g_smp_nearest);

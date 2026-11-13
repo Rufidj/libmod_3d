@@ -17,6 +17,15 @@ else()
     set(IS_VITA FALSE)
 endif()
 
+# PS5: no GLX/system OpenGL to find_package() against (cross-compiled, no
+# pkg-config, no X11) - the driver is PS5_OPENGL_SDK_ROOT's own prebuilt
+# Mesa/gallium archives, wired in directly in the linking section below.
+if(PROSPERO)
+    set(IS_PROSPERO TRUE)
+else()
+    set(IS_PROSPERO FALSE)
+endif()
+
 # ============================================================================
 # Compiler flags
 # ============================================================================
@@ -31,7 +40,7 @@ endif()
 # SDL2 dependency
 # ============================================================================
 
-if(NOT EMSCRIPTEN AND NOT IS_VITA)
+if(NOT EMSCRIPTEN AND NOT IS_VITA AND NOT IS_PROSPERO)
     find_package(SDL2 REQUIRED)
     find_package(SDL2_image REQUIRED)
     find_package(OpenGL REQUIRED)
@@ -41,6 +50,12 @@ if(NOT EMSCRIPTEN AND NOT IS_VITA)
     if(WIN32)
         find_package(GLEW REQUIRED)
     endif()
+elseif(IS_PROSPERO)
+    # SDL2/SDL2_image are already resolved from build.sh's -D...LIBRARY/_INCLUDE_DIR
+    # cache variables (same pattern the VITA branch uses below); there is no
+    # OpenGL to find_package() here at all.
+    find_package(SDL2 REQUIRED)
+    find_package(SDL2_image REQUIRED)
 endif()
 
 # ============================================================================
@@ -70,6 +85,9 @@ else()
         ../../vendor/sdl-gpu/include
         ${INCLUDE_DIRECTORIES}
     )
+    if(IS_PROSPERO)
+        include_directories(${PS5_OPENGL_SDK_ROOT}/include)
+    endif()
 endif()
 
 # ============================================================================
@@ -97,6 +115,7 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_primitives.c
     libmod_3d_terrain.c
     libmod_3d_zone.c
+    libmod_3d_lvl.c
     libmod_3d_paint.c
     libmod_3d_water.c
     libmod_3d_flow.c
@@ -151,17 +170,31 @@ endif()
 # VITA always uses the fallback (Jolt is excluded there).
 # ============================================================================
 option(USE_JOLT "Use Jolt Physics for rigid bodies" ON)
-if(USE_JOLT AND NOT IS_VITA AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/jolt/Build/CMakeLists.txt")
+if(IS_PROSPERO)
+    # TODO(ps5): cross-compiling Jolt (C++17, exceptions/RTTI assumptions) through
+    # the prospero-clang18 wrapper is its own piece of work - deferred, fall back
+    # to the built-in rigid bodies for now so the rest of the module builds.
+    set(USE_JOLT OFF)
+endif()
+if(USE_JOLT AND NOT IS_VITA AND NOT IS_PROSPERO AND NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/jolt/Build/CMakeLists.txt")
     message(WARNING "USE_JOLT is ON but jolt/ is missing - falling back to the built-in rigid bodies")
     set(USE_JOLT OFF)
 endif()
-if(USE_JOLT AND NOT IS_VITA)
+if(USE_JOLT AND NOT IS_VITA AND NOT IS_PROSPERO)
     list(APPEND SOURCES_LIBMOD_3D libmod_3d_jolt.cpp)
 endif()
 
+# libmod_3d_shader.c, and libmod_3d_fsr.c/libmod_3d_smaa.c (via the
+# fsr_shader.h/smaa_shader.h they #include) embed GLSL/HLSL sources as
+# C++11 raw string literals (R"glsl(...)"), and ufbx.c (vendored) uses some
+# too - none of that is valid C, so all four need the C++ front end
+# regardless of their .c extension. Harmless everywhere: CMake passes -x c++
+# for them and otherwise compiles identically.
+set_source_files_properties(libmod_3d_shader.c libmod_3d_fsr.c libmod_3d_smaa.c ufbx.c PROPERTIES LANGUAGE CXX)
+
 add_library(mod_3d ${LIBRARY_BUILD_TYPE} ${SOURCES_LIBMOD_3D})
 
-if(USE_JOLT AND NOT IS_VITA)
+if(USE_JOLT AND NOT IS_VITA AND NOT IS_PROSPERO)
     set(TARGET_UNIT_TESTS OFF CACHE BOOL "" FORCE)
     set(TARGET_HELLO_WORLD OFF CACHE BOOL "" FORCE)
     set(TARGET_PERFORMANCE_TEST OFF CACHE BOOL "" FORCE)
@@ -198,6 +231,21 @@ if(IS_VITA)
         sdlhandler
         ${STDLIBSFLAGS}
         -lm
+    )
+elseif(IS_PROSPERO)
+    # The actual GL driver archives (Mesa/gallium) and the libc++ runtime
+    # (needed now for this module's raw-string/ufbx.c C++ TUs) are resolved
+    # at eboot-packaging time, not here - this .a is a compile-only artifact
+    # on PS5; see this module's platform-detection comment above.
+    target_link_libraries(mod_3d
+        ${SDL2_LIBRARY}
+        ${SDL2_IMAGE_LIBRARY}
+        ${SDL_GPU_LIBRARY}
+        -L../../bin
+        bgdrtm
+        bggfx
+        sdlhandler
+        ${STDLIBSFLAGS}
     )
 else()
     target_link_libraries(mod_3d

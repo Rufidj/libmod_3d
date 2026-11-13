@@ -8,6 +8,7 @@
  */
 
 #define CGLTF_IMPLEMENTATION
+static double g3d_prof_now(void);
 #include "cgltf.h"
 
 #include "libmod_3d_gltf.h"
@@ -143,7 +144,7 @@ static G3DTexture *texture_from_surface(SDL_Surface *src) {
                (size_t)rgba->w * 4);
     }
     SDL_FreeSurface(rgba);
-    g3d_texture_upload_gpu(tex);
+    g3d_texture_defer_upload(tex);   /* uploaded by g3d_texture_flush_pending() */
     return tex;
 }
 
@@ -185,7 +186,41 @@ static G3DTexture *load_file_texture(const char *path) {
 
 /* Load a cgltf image to a G3DTexture, handling DDS (block-compressed, GPU-native)
    and everything SDL2_image can decode (PNG/JPG/...), embedded or external. */
+static G3DTexture *load_image_texture_uncached(cgltf_image *img, const char *gltf_path);
+
+/* Texture cache for glTF images: the same model is often loaded several times
+   (scatter, scenes), and each load used to decode and upload every texture again.
+   Textures are never freed by g3d_gltf_free, so sharing them is safe. Only
+   successful loads are cached. Key: the image source (embedded: file + byte
+   offset/size; external: file + uri). */
+#define GLTF_TEX_CACHE_MAX 512
+typedef struct { char key[1024]; G3DTexture *tex; } GltfTexCacheEntry;
+static GltfTexCacheEntry g_gltf_tex_cache[GLTF_TEX_CACHE_MAX];
+static int g_gltf_tex_cache_count = 0;
+
 static G3DTexture *load_image_texture(cgltf_image *img, const char *gltf_path) {
+    if (!img) return NULL;
+    char key[1024];
+    if (img->buffer_view) {
+        cgltf_buffer_view *bv = img->buffer_view;
+        snprintf(key, sizeof(key), "E|%s|%zu|%zu", gltf_path ? gltf_path : "", (size_t)bv->offset, (size_t)bv->size);
+    } else if (img->uri && strncmp(img->uri, "data:", 5) != 0) {
+        snprintf(key, sizeof(key), "F|%s|%s", gltf_path ? gltf_path : "", img->uri);
+    } else {
+        return load_image_texture_uncached(img, gltf_path);
+    }
+    for (int i = 0; i < g_gltf_tex_cache_count; i++)
+        if (strcmp(g_gltf_tex_cache[i].key, key) == 0) return g_gltf_tex_cache[i].tex;
+    G3DTexture *tex = load_image_texture_uncached(img, gltf_path);
+    if (tex && g_gltf_tex_cache_count < GLTF_TEX_CACHE_MAX) {
+        snprintf(g_gltf_tex_cache[g_gltf_tex_cache_count].key, sizeof(g_gltf_tex_cache[0].key), "%s", key);
+        g_gltf_tex_cache[g_gltf_tex_cache_count].tex = tex;
+        g_gltf_tex_cache_count++;
+    }
+    return tex;
+}
+
+static G3DTexture *load_image_texture_uncached(cgltf_image *img, const char *gltf_path) {
     if (!img) return NULL;
 
     /* Embedded in the .glb buffer: we have the raw bytes directly. */
@@ -627,15 +662,23 @@ static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell) 
    re-centered on X/Z and dropped to Y=0. Streamed world/map sectors need this:
    their geometry is baked at absolute world positions, so re-centering each
    sector to the origin would pile every sector on top of each other. */
+static double g3d_prof_now(void);
+#include <time.h>
+static double g3d_prof_now(void) {
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6;
+}
 static int g_gltf_recenter = 1;
 void g3d_gltf_set_recenter(int on) { g_gltf_recenter = on ? 1 : 0; }
 
 static void model_recenter_upload_off(G3DMesh *meshes, int sub, float *out_off) {
     if (sub <= 0)
         return;
+    Uint32 r0 = SDL_GetTicks();
     /* Recompute bounds first (vertices may have just been rotated by orient) */
     for (int s = 0; s < sub; s++)
         g3d_mesh_calculate_bounds(&meshes[s]);
+    printf("G3D: TIMING recenter.bounds1=%ums\n", (unsigned)(SDL_GetTicks() - r0));
     float mn[3], mx[3];
     for (int k = 0; k < 3; k++) { mn[k] = meshes[0].aabb_min[k]; mx[k] = meshes[0].aabb_max[k]; }
     for (int s = 1; s < sub; s++) {
@@ -646,19 +689,29 @@ static void model_recenter_upload_off(G3DMesh *meshes, int sub, float *out_off) 
     }
     float off[3] = { -0.5f * (mn[0] + mx[0]), -mn[1], -0.5f * (mn[2] + mx[2]) };
     if (!g_gltf_recenter) { off[0] = off[1] = off[2] = 0.0f; }   /* keep absolute coords (sectors) */
+    printf("G3D: TIMING recenter.bounds_and_range=%ums\n", (unsigned)(SDL_GetTicks() - r0));
+    double pt_add = 0, pt_bnd = 0, pt_up = 0; uint64_t pt_verts = 0;
     for (int s = 0; s < sub; s++) {
         G3DMesh *m = &meshes[s];
+        double q0 = g3d_prof_now();
         for (uint32_t v = 0; v < m->vertex_count; v++) {
             m->vertices[v].position[0] += off[0];
             m->vertices[v].position[1] += off[1];
             m->vertices[v].position[2] += off[2];
         }
+        double q1 = g3d_prof_now();
         g3d_mesh_calculate_bounds(m);
+        double q2 = g3d_prof_now();
         if (m->gpu_uploaded)
             g3d_mesh_update_gpu(m);   /* orient(): re-upload edited vertices */
         else
             g3d_mesh_upload_gpu(m);
+        double q3 = g3d_prof_now();
+        pt_add += q1 - q0; pt_bnd += q2 - q1; pt_up += q3 - q2; pt_verts += m->vertex_count;
     }
+    printf("G3D: PROF recenter: %d meshes %llu verts: add=%.1fms bounds=%.1fms upload=%.1fms\n",
+           sub, (unsigned long long)pt_verts, pt_add, pt_bnd, pt_up);
+    printf("G3D: TIMING recenter.offset_and_upload=%ums\n", (unsigned)(SDL_GetTicks() - r0));
     if (out_off) { out_off[0] = off[0]; out_off[1] = off[1]; out_off[2] = off[2]; }
 }
 
@@ -824,7 +877,57 @@ static int build_skeleton(cgltf_data *data, G3DModel *model) {
     return 1;
 }
 
+/* Shared models for scene placement: a map repeats the same prop hundreds of
+   times (MODEL / SCATTER lines), and each placement used to parse, decode and
+   upload the whole file again. Placement only reads meshes and textures, and
+   nothing on that path frees the model, so one load per path is enough. Do NOT
+   use this for models that carry per-instance animation state. */
+#define GLTF_SHARED_MAX 256
+static struct { char path[512]; G3DModel *model; } g_gltf_shared[GLTF_SHARED_MAX];
+static int g_gltf_shared_count = 0;
+
+G3DModel *g3d_gltf_load_impl_timed(const char *filepath);
 G3DModel *g3d_gltf_load(const char *filepath) {
+    if (!filepath) return NULL;
+    for (int i = 0; i < g_gltf_shared_count; i++)
+        if (strcmp(g_gltf_shared[i].path, filepath) == 0) return g_gltf_shared[i].model;
+    Uint32 t0 = SDL_GetTicks();
+    G3DModel *m = g3d_gltf_load_impl_timed(filepath);
+    printf("G3D: TIMING gltf %s total=%ums\n", filepath, (unsigned)(SDL_GetTicks() - t0));
+    /* Only static props are shared: an animated model keeps per-model playback
+       state, so two instances would fight over it. Those load fresh each time. */
+    if (m && m->animation_count == 0 && m->joint_count == 0 && g_gltf_shared_count < GLTF_SHARED_MAX) {
+        snprintf(g_gltf_shared[g_gltf_shared_count].path, sizeof(g_gltf_shared[0].path), "%s", filepath);
+        g_gltf_shared[g_gltf_shared_count].model = m;
+        g_gltf_shared_count++;
+    }
+    return m;
+}
+
+/* Quita un modelo de la cache de modelos compartidos y lo devuelve (NULL si no estaba): la siguiente carga de esa ruta
+   lee el fichero de nuevo. Lo usa el editor con las vistas previas, que reescriben el mismo .glb. */
+G3DModel *g3d_gltf_unshare(const char *filepath) {
+    if (!filepath) return NULL;
+    for (int i = 0; i < g_gltf_shared_count; i++)
+        if (strcmp(g_gltf_shared[i].path, filepath) == 0) {
+            G3DModel *m = g_gltf_shared[i].model;
+            g_gltf_shared[i] = g_gltf_shared[g_gltf_shared_count - 1];
+            g_gltf_shared_count--;
+            return m;
+        }
+    return NULL;
+}
+
+static Uint32 g_ph_last = 0;
+static void gltf_ph_reset(void) { g_ph_last = SDL_GetTicks(); }
+static void gltf_ph(const char *name) {
+    Uint32 n = SDL_GetTicks();
+    printf("G3D: TIMING gltf.%s=%ums\n", name, (unsigned)(n - g_ph_last));
+    g_ph_last = n;
+}
+
+G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
+    gltf_ph_reset();
     if (!filepath)
         return NULL;
 
@@ -836,6 +939,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
         fprintf(stderr, "G3D: glTF parse failed: %s\n", filepath);
         return NULL;
     }
+    gltf_ph("parse");
     if (cgltf_load_buffers(&options, data, filepath) != cgltf_result_success) {
         fprintf(stderr, "G3D: glTF buffer load failed: %s\n", filepath);
         cgltf_free(data);
@@ -881,13 +985,19 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     unsigned char *outline = (unsigned char *)calloc(max_sub, 1);
     int sub = 0;
 
+    gltf_ph("buffers");
+    double pf_build = 0, pf_tex = 0;
     for (cgltf_size m = 0; m < data->materials_count; m++) {
+        double z0 = g3d_prof_now();
         G3DMesh *sm = build_submesh(data, &data->materials[m], NULL, anim_flag, 0);
+        pf_build += g3d_prof_now() - z0;
         if (!sm)
             continue;
         meshes[sub] = *sm;           /* copy mesh struct into the array */
         free(sm);
+        z0 = g3d_prof_now();
         textures[sub] = gltf_load_base_color(&data->materials[m], filepath);
+        pf_tex += g3d_prof_now() - z0;
         if (outline) outline[sub] = (unsigned char)gltf_is_outline_material(&data->materials[m]);
         sub++;
     }
@@ -939,7 +1049,10 @@ G3DModel *g3d_gltf_load(const char *filepath) {
                diag/6 measured on Bistro at street level: finer cells buy almost
                no extra triangle savings (-16% at diag/6 vs -20% at diag/12) but
                cost far more draw calls (341 vs 586). Coarse wins. */
-            cell = (diag > 40.0f) ? (diag / 6.0f) : 0.0f;
+            /* Threshold raised from 40 to 150: props this size (pirate_ship,
+               medieval_house) were chunked into 6x6 pieces and each piece was
+               uploaded separately, which dominated load time on PS5. */
+            cell = (diag > 150.0f) ? (diag / 6.0f) : 0.0f;
         }
         if (cell > 0.0f) {
             chunk_model(&meshes, &textures, &sub, cell);
@@ -952,11 +1065,14 @@ G3DModel *g3d_gltf_load(const char *filepath) {
         }
     }
 
+    printf("G3D: PROF gltf %s: build_submesh=%.1fms base_color_textures=%.1fms\n", filepath, pf_build, pf_tex);
+    gltf_ph("submeshes_and_chunk");
     /* Center on X/Z, rest on Y=0, upload. Capture the offset so skinned models
        (whose bind_pos stays un-offset) can re-apply it after skinning. */
     float off[3] = {0, 0, 0};
     model_recenter_upload_off(meshes, sub, off);
 
+    gltf_ph("recenter_upload");
     /* Build one LOCAL-space submesh per animated node (after recenter so it is
        NOT baked/offset). Its AABB is stored in model space (rest node world +
        off) so frustum culling still works; the renderer applies node_global
@@ -1003,6 +1119,7 @@ G3DModel *g3d_gltf_load(const char *filepath) {
     strncpy(model->filepath, filepath, sizeof(model->filepath) - 1);
 
     /* Skeleton + animations (while cgltf data is still alive) */
+    gltf_ph("anim_nodes_pre_skeleton");
     if (build_skeleton(data, model)) {
         model->skin_offset[0] = off[0];
         model->skin_offset[1] = off[1];
@@ -1014,6 +1131,9 @@ G3DModel *g3d_gltf_load(const char *filepath) {
            meshes[0].aabb_max[1] - meshes[0].aabb_min[1],
            model->animation_count, model->joint_count);
 
+    gltf_ph("skeleton_and_nodes");
+    g3d_texture_flush_pending();   /* GL handles for every texture queued above */
+    gltf_ph("texture_flush");
     cgltf_free(data);
     return model;
 }
@@ -1096,9 +1216,13 @@ G3DModel *g3d_gltf_load_fractured(const char *filepath) {
     printf("G3D: glTF loaded (fractured): %s (%d chunks, materials=%d)\n",
            filepath, sub, mc);
 
+    g3d_texture_flush_pending();   /* GL handles for every texture queued above */
     cgltf_free(data);
     return model;
 }
+
+
+G3DModel *g3d_gltf_load_shared(const char *filepath) { return g3d_gltf_load(filepath); }
 
 void g3d_gltf_free(G3DModel *model) {
     if (!model)

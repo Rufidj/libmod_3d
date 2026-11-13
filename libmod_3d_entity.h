@@ -78,6 +78,12 @@ typedef struct {
     /* Factors for G3D_BLEND_CUSTOM (raw GL enums, like BennuGD's custom_blendmode):
        [0]src_rgb [1]dst_rgb [2]src_alpha [3]dst_alpha [4]eq_rgb [5]eq_alpha */
     int blend_custom[6];
+
+    /* X-ray (ver-a-traves): una entidad marcada se vuelve translucida cuando se interpone entre la camara y el objetivo
+       (g3d_xray_update). xray_base es su opacidad normal; xray_fade el factor actual (1 = sin efecto). */
+    int xray;
+    float xray_fade;
+    float xray_base;
 } G3DEntity;
 
 /* Blend modes - values MATCH BennuGD's g_blit.h so the process `blendmode` local
@@ -117,6 +123,7 @@ int g3d_entity_impl_set_scale(int entity_id, float sx, float sy, float sz);
 int g3d_entity_impl_set_collider(int entity_id, int solid);
 int g3d_entity_impl_get_position(int entity_id, float *x, float *y, float *z);
 int g3d_entity_impl_set_parent(int entity_id, int parent_id);
+void g3d_entity_impl_set_spawn_parent(int parent_id);
 
 /* Material */
 int g3d_entity_impl_set_material(int entity_id, int material_id);
@@ -135,6 +142,13 @@ int g3d_entity_impl_set_blend_custom(int entity_id, int src_rgb, int dst_rgb,
                                      int src_alpha, int dst_alpha,
                                      int eq_rgb, int eq_alpha);
 
+
+/* X-ray: marca (on=1) o desmarca (on=0) una entidad como "se vuelve translucida si tapa al objetivo". */
+int g3d_entity_impl_set_xray(int entity_id, int on);
+/* Una vez por frame: las entidades marcadas cuya caja corta el segmento camara->objetivo (engordado por `radius`) se desvanecen
+   hacia `min_alpha` (0..1) y vuelven a su opacidad al dejar de taparlo. `speed` (0..1) es la fraccion que se avanza por frame. */
+void g3d_xray_update(float cx, float cy, float cz, float tx, float ty, float tz,
+                     float radius, float min_alpha, float speed);
 
 /* Matrix */
 Mat4 g3d_entity_impl_get_world_matrix(int entity_id);

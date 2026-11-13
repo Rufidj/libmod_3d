@@ -5,6 +5,9 @@
 #include "libmod_3d_entity.h"
 #include "libmod_3d_scene.h"
 #include "libmod_3d_material.h"
+#include "libmod_3d_mesh.h"
+#include "libmod_3d_sprite.h"
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +16,9 @@
 static G3DEntity g_entities[G3D_MAX_ENTITIES];
 static int g_entity_count = 0;
 
+/* Todo lo que se cree mientras hay un 'padre de creacion' cuelga de el: asi un mapa 2.5D se construye con SUS coordenadas y se coloca
+   en el mundo moviendo una entidad raiz (los sprites, que no son entidades, reciben su posicion como origen). -1 = nada. */
+static int g_spawn_parent = -1;
 int g3d_entity_impl_spawn(int scene_id, int model_id, float x, float y, float z) {
     /* Reuse a freed slot first (long-running games spawn/despawn constantly:
        projectiles, fracture chunks, particles). */
@@ -34,7 +40,7 @@ int g3d_entity_impl_spawn(int scene_id, int model_id, float x, float y, float z)
     entity->scene_id = scene_id;
     entity->model_id = model_id;
     entity->material_id = -1;
-    entity->parent_id = -1;
+    entity->parent_id = (g_spawn_parent >= 0 && g_spawn_parent != entity_id) ? g_spawn_parent : -1;
     entity->active = 1;
     entity->world_matrix_dirty = 1;
     entity->occ_visible = 1;  /* drawn until a query proves it's hidden */
@@ -297,4 +303,81 @@ void g3d_entity_impl_shutdown(void) {
     }
     g_entity_count = 0;
     printf("G3D: Entity system shut down\n");
+}
+
+
+/* ---------------------------------------------------------------------------
+ *  X-ray: muros (o lo que sea) que se vuelven translucidos al taparle la camara al personaje
+ * ------------------------------------------------------------------------- */
+int g3d_entity_impl_set_xray(int entity_id, int on) {
+    G3DEntity *e = g3d_entity_impl_get(entity_id);
+    if (!e) return 0;
+    if (on && !e->xray) { e->xray_base = e->opacity; e->xray_fade = 1.0f; }
+    if (!on && e->xray) e->opacity = e->xray_base;
+    e->xray = on ? 1 : 0;
+    return 1;
+}
+
+/* el segmento a->b (t en 0..1) corta la caja [mn,mx]? (metodo de las losas) */
+static int seg_hits_box(const float *a, const float *b, const float *mn, const float *mx) {
+    float t0 = 0.0f, t1 = 1.0f;
+    for (int k = 0; k < 3; k++) {
+        float d = b[k] - a[k];
+        if (fabsf(d) < 1e-6f) {
+            if (a[k] < mn[k] || a[k] > mx[k]) return 0;
+        } else {
+            float ta = (mn[k] - a[k]) / d, tb = (mx[k] - a[k]) / d;
+            if (ta > tb) { float t = ta; ta = tb; tb = t; }
+            if (ta > t0) t0 = ta;
+            if (tb < t1) t1 = tb;
+            if (t0 > t1) return 0;
+        }
+    }
+    return 1;
+}
+
+void g3d_xray_update(float cx, float cy, float cz, float tx, float ty, float tz,
+                     float radius, float min_alpha, float speed) {
+    float a[3] = { cx, cy, cz }, b[3] = { tx, ty, tz };
+    {   // el segmento acaba 'radius' antes del objetivo: un muro justo DELANTE del objetivo (que no tapa nada) no debe hacerse translucido
+        float d[3] = { b[0]-a[0], b[1]-a[1], b[2]-a[2] };
+        float len = sqrtf(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+        float cut = (len > radius * 2.0f) ? radius : len * 0.5f;
+        if (len > 1e-4f) for (int k = 0; k < 3; k++) b[k] -= d[k] / len * cut;
+        // y empieza 'radius' despues de la camara: un muro pegado a la camara (a su lado) tampoco tapa nada
+        if (len > radius * 3.0f) for (int k = 0; k < 3; k++) a[k] += d[k] / len * radius;
+    }
+    if (min_alpha < 0.0f) min_alpha = 0.0f; else if (min_alpha > 1.0f) min_alpha = 1.0f;
+    if (speed < 0.01f) speed = 0.01f; else if (speed > 1.0f) speed = 1.0f;
+    for (int i = 0; i < g_entity_count; i++) {
+        G3DEntity *e = &g_entities[i];
+        if (!e->active || !e->xray || !e->mesh) continue;
+        G3DMesh *m = (G3DMesh *)e->mesh;
+        Mat4 w = g3d_entity_impl_get_world_matrix(i);
+        float mn[3] = { 1e30f, 1e30f, 1e30f }, mx[3] = { -1e30f, -1e30f, -1e30f };
+        for (int c = 0; c < 8; c++) {
+            Vec3 corner = vec3_make((c & 1) ? m->aabb_max[0] : m->aabb_min[0],
+                                    (c & 2) ? m->aabb_max[1] : m->aabb_min[1],
+                                    (c & 4) ? m->aabb_max[2] : m->aabb_min[2]);
+            Vec3 p = mat4_transform_point(w, corner);
+            float pp[3] = { p.x, p.y, p.z };
+            for (int k = 0; k < 3; k++) { if (pp[k] < mn[k]) mn[k] = pp[k]; if (pp[k] > mx[k]) mx[k] = pp[k]; }
+        }
+        for (int k = 0; k < 3; k++) { mn[k] -= radius; mx[k] += radius; }
+        float goal = seg_hits_box(a, b, mn, mx) ? min_alpha : 1.0f;
+        e->xray_fade += (goal - e->xray_fade) * speed;
+        if (fabsf(e->xray_fade - goal) < 0.004f) e->xray_fade = goal;
+        e->opacity = (e->xray_fade >= 0.999f) ? e->xray_base : e->xray_base * e->xray_fade;
+    }
+}
+
+void g3d_entity_impl_set_spawn_parent(int parent_id) {
+    g_spawn_parent = parent_id;
+    if (parent_id >= 0) {
+        Mat4 w = g3d_entity_impl_get_world_matrix(parent_id);
+        /* giro del grupo en Y a partir de la matriz del mundo (columna X = (cos, 0, -sin)) */
+        g3d_sprite_set_origin(w.m[12], w.m[13], w.m[14], atan2f(-w.m[2], w.m[0]));
+    } else {
+        g3d_sprite_set_origin(0.0f, 0.0f, 0.0f, 0.0f);
+    }
 }

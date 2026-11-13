@@ -120,7 +120,17 @@ static const char *inst_depth_frag =
 
 /* ---- GPU-skinned instanced shaders (bind pose + per-vertex joints/weights,
    per-instance matrix in 3..6, bone matrices in uBones). Reuses inst_frag. ---- */
+/* PS5's GL caps a vertex shader at 1024 default-uniform components (256 vec4);
+   uBones is mat4[N] = 4N vec4, so it must stay well under that there. */
+#ifdef __PROSPERO__
+#define INST_MAX_BONES 60
+#else
 #define INST_MAX_BONES 100
+#endif
+#ifndef G3D_STR
+#define G3D_STR_(x) #x
+#define G3D_STR(x) G3D_STR_(x)
+#endif
 static const char *inst_skin_vert =
     "#version 330 core\n"
     "layout(location=0) in vec3 position;\n"
@@ -133,7 +143,7 @@ static const char *inst_skin_vert =
     "layout(location=7) in vec4 joints;\n"
     "layout(location=8) in vec4 weights;\n"
     "uniform mat4 uView; uniform mat4 uProjection;\n"
-    "uniform mat4 uBones[100]; uniform vec3 uSkinOffset; uniform int uBoneCount;\n"
+    "uniform mat4 uBones[" G3D_STR(INST_MAX_BONES) "]; uniform vec3 uSkinOffset; uniform int uBoneCount;\n"
     "out vec3 vN; out vec2 vUV; out vec3 vWP;\n"
     "void main(){\n"
     "  mat4 M = mat4(iM0,iM1,iM2,iM3);\n"
@@ -159,7 +169,7 @@ static const char *inst_skin_depth_vert =
     "layout(location=7) in vec4 joints;\n"
     "layout(location=8) in vec4 weights;\n"
     "uniform mat4 uLightSpace;\n"
-    "uniform mat4 uBones[100]; uniform vec3 uSkinOffset; uniform int uBoneCount;\n"
+    "uniform mat4 uBones[" G3D_STR(INST_MAX_BONES) "]; uniform vec3 uSkinOffset; uniform int uBoneCount;\n"
     "void main(){\n"
     "  mat4 M = mat4(iM0,iM1,iM2,iM3);\n"
     "  float ws = weights.x+weights.y+weights.z+weights.w;\n"
@@ -666,9 +676,9 @@ void g3d_instances_render_depth(Mat4 light_space) {
         ensure_all_uploaded(gr);
         if (gr->skinned && gr->skin_model) {
             g3d_shader_use(g_inst.skin_depth_shader);
-            g3d_shader_set_mat4_array(g_inst.skin_depth_shader, "uBones", gr->skin_model->joint_matrix, gr->skin_model->joint_count);
+            g3d_shader_set_mat4_array(g_inst.skin_depth_shader, "uBones", gr->skin_model->joint_matrix, gr->skin_model->joint_count < INST_MAX_BONES ? gr->skin_model->joint_count : INST_MAX_BONES);
             g3d_shader_set_vec3(g_inst.skin_depth_shader, "uSkinOffset", vec3_make(gr->skin_model->skin_offset[0], gr->skin_model->skin_offset[1], gr->skin_model->skin_offset[2]));
-            g3d_shader_set_int(g_inst.skin_depth_shader, "uBoneCount", gr->skin_model->joint_count);
+            g3d_shader_set_int(g_inst.skin_depth_shader, "uBoneCount", gr->skin_model->joint_count < INST_MAX_BONES ? gr->skin_model->joint_count : INST_MAX_BONES);
         } else {
             g3d_shader_use(g_inst.depth_shader);
             g3d_shader_set_float(g_inst.depth_shader, "uWind", gr->wind);
@@ -853,9 +863,9 @@ subir_al_gpu:
             if (gr->tex) { glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_2D, gr->tex); g3d_shader_set_int(sp, "uTex", 0); g3d_shader_set_int(sp, "uHasTex", 1); }
             else g3d_shader_set_int(sp, "uHasTex", 0);
             if (gr->skinned && gr->skin_model) {
-                g3d_shader_set_mat4_array(sp, "uBones", gr->skin_model->joint_matrix, gr->skin_model->joint_count);
+                g3d_shader_set_mat4_array(sp, "uBones", gr->skin_model->joint_matrix, gr->skin_model->joint_count < INST_MAX_BONES ? gr->skin_model->joint_count : INST_MAX_BONES);
                 g3d_shader_set_vec3(sp, "uSkinOffset", vec3_make(gr->skin_model->skin_offset[0], gr->skin_model->skin_offset[1], gr->skin_model->skin_offset[2]));
-                g3d_shader_set_int(sp, "uBoneCount", gr->skin_model->joint_count);
+                g3d_shader_set_int(sp, "uBoneCount", gr->skin_model->joint_count < INST_MAX_BONES ? gr->skin_model->joint_count : INST_MAX_BONES);
             } else g3d_shader_set_float(sp, "uWind", gr->wind);
             glDrawElementsInstanced(GL_TRIANGLES, gr->mesh->index_count, GL_UNSIGNED_INT, 0, vis);
             g3d_renderer_add_stats(1, (gr->mesh->index_count / 3) * (uint32_t)vis);

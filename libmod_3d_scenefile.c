@@ -151,7 +151,7 @@ static int make_mat(const char *tex, float r, float g, float b) {
 
 static void place_model(int scene, const char *path, float x, float y, float z,
                         float rx, float ry, float rz, float sx, float sy, float sz) {
-    G3DModel *model = g3d_gltf_load(path);
+    G3DModel *model = g3d_gltf_load_shared(path);
     if (!model) return;
     for (uint32_t s = 0; s < model->mesh_count; s++) {
         int ent = g3d_entity_impl_spawn(scene, 0, x, y, z);
@@ -380,7 +380,7 @@ int g3d_scene_load(const char *file) {
             char path[256]; int count, seed; float area, th, sv, wind;
             sscanf(line, "SCATTER %255s %d %f %f %f %f %d", path, &count, &area,
                    &th, &sv, &wind, &seed);
-            G3DModel *m = g3d_gltf_load(path);
+            G3DModel *m = g3d_gltf_load_shared(path);
             if (m && terrain) g3d_scatter_model(m, terrain, count, area, th, sv, wind, (unsigned)seed);
         } else if (strncmp(line, "MODEL", 5) == 0) {
             char path[256]; float x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1;

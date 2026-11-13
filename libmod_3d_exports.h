@@ -15,7 +15,7 @@
 #include "libmod_3d.h"
 
 /* Constants exported */
-DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
+DLCONSTANT __bgdexport( libmod_3d, constants_def )[] = {
     /* 3D */
     { "C_3D",                   TYPE_QWORD, C_3D},
 
@@ -54,7 +54,7 @@ DLCONSTANT __bgdexport(libmod_3d, constants_def)[] = {
 /* --------------------------------------------------------------------------- */
 /* Local variables added to every process when libmod_3d is loaded             */
 
-char * __bgdexport(libmod_3d, locals_def) =
+char * __bgdexport( libmod_3d, locals_def ) =
     "DOUBLE angle_x=0.0;\n"
     "DOUBLE angle_y=0.0;\n"
     "DOUBLE angle_z=0.0;\n"
@@ -123,6 +123,8 @@ int64_t g3d_entity_set_parent_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_material_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_alpha_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_color_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_entity_set_xray_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_xray_update_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_entity_set_blend_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_set_active_bgd(INSTANCE *my, int64_t *params);
@@ -391,6 +393,16 @@ int64_t g3d_particles_set_color_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_particles_set_floor_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_particles_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_primitive_cube_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_primitive_column_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_primitive_wedge_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_set_spawn_parent_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_load_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_free_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_planes_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_w_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_h_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_cell_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_lvl_links_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_primitive_sphere_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_primitive_plane_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_primitive_terrain_bgd(INSTANCE *my, int64_t *params);
@@ -424,6 +436,7 @@ int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_camera_safe_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_collider_add_model_yaw_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_scatter_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_zone_clear_bgd(INSTANCE *my, int64_t *params);
@@ -471,7 +484,7 @@ int64_t g3d_material_set_map_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_material_set_outline_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_model_submesh_map_bgd(INSTANCE *my, int64_t *params);
 
-DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
+DLSYSFUNCS __bgdexport( libmod_3d, functions_exports )[] = {
     // FUNC("G3D_INIT", "II", TYPE_INT, g3d_init_bgd),
     // FUNC("G3D_SHUTDOWN", "", TYPE_INT, g3d_shutdown_bgd),
     // FUNC("G3D_RENDER", "I", TYPE_INT, g3d_render_bgd),
@@ -625,6 +638,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_COLLIDER_ADD_MESH", "IIFFFF", TYPE_INT, g3d_collider_add_mesh_bgd),
     /* el modelo entero de una vez: malla exacta (fija) o envolvente (se mueve) */
     FUNC("G3D_COLLIDER_ADD_MODEL", "IFFFF", TYPE_INT, g3d_collider_add_model_bgd),
+    FUNC("G3D_COLLIDER_ADD_MODEL_YAW", "IFFFFF", TYPE_INT, g3d_collider_add_model_yaw_bgd),
     FUNC("G3D_RIGIDBODY_CREATE_CONVEX_MODEL", "FFFIFF", TYPE_INT, g3d_rigidbody_create_convex_model_bgd),
     FUNC("G3D_RIGIDBODY_DESTROY", "I", TYPE_INT, g3d_rigidbody_destroy_bgd),
     FUNC("G3D_RIGIDBODY_CLEAR", "", TYPE_INT, g3d_rigidbody_clear_bgd),
@@ -829,6 +843,16 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_PARTICLES_CLEAR", "", TYPE_INT, g3d_particles_clear_bgd),
     FUNC("G3D_RAYCAST", "FFFFFFPPP", TYPE_INT, g3d_raycast_bgd),
     FUNC("G3D_PRIMITIVE_CUBE", "", TYPE_INT, g3d_primitive_cube_bgd),
+    FUNC("G3D_PRIMITIVE_COLUMN", "I", TYPE_INT, g3d_primitive_column_bgd),
+    FUNC("G3D_PRIMITIVE_WEDGE", "", TYPE_INT, g3d_primitive_wedge_bgd),
+    FUNC("G3D_SET_SPAWN_PARENT", "I", TYPE_INT, g3d_set_spawn_parent_bgd),
+    FUNC("G3D_LVL_LOAD", "S", TYPE_INT, g3d_lvl_load_bgd),
+    FUNC("G3D_LVL_FREE", "I", TYPE_INT, g3d_lvl_free_bgd),
+    FUNC("G3D_LVL_PLANES", "I", TYPE_INT, g3d_lvl_planes_bgd),
+    FUNC("G3D_LVL_W", "II", TYPE_INT, g3d_lvl_w_bgd),
+    FUNC("G3D_LVL_H", "II", TYPE_INT, g3d_lvl_h_bgd),
+    FUNC("G3D_LVL_CELL", "IIIII", TYPE_INT, g3d_lvl_cell_bgd),
+    FUNC("G3D_LVL_LINKS", "I", TYPE_STRING, g3d_lvl_links_bgd),
     FUNC("G3D_PRIMITIVE_SPHERE", "I", TYPE_INT, g3d_primitive_sphere_bgd),
     FUNC("G3D_PRIMITIVE_PLANE", "", TYPE_INT, g3d_primitive_plane_bgd),
     FUNC("G3D_PRIMITIVE_TERRAIN", "IFFFI", TYPE_INT, g3d_primitive_terrain_bgd),
@@ -848,6 +872,8 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC("G3D_ENTITY_SET_MATERIAL", "II", TYPE_INT, g3d_entity_set_material_bgd),
     FUNC("G3D_ENTITY_SET_ALPHA", "II", TYPE_INT, g3d_entity_set_alpha_bgd),
     FUNC("G3D_ENTITY_SET_COLOR", "IIII", TYPE_INT, g3d_entity_set_color_bgd),
+    FUNC("G3D_ENTITY_SET_XRAY", "II", TYPE_INT, g3d_entity_set_xray_bgd),
+    FUNC("G3D_XRAY_UPDATE", "FFFFFFFFF", TYPE_INT, g3d_xray_update_bgd),
     FUNC("G3D_ENTITY_SET_BLEND", "II", TYPE_INT, g3d_entity_set_blend_bgd),
     FUNC("G3D_MATERIAL_SET_TEXTURE", "III", TYPE_INT, g3d_material_set_texture_bgd),
     FUNC("G3D_MATERIAL_SET_MAP", "III", TYPE_INT, g3d_material_set_map_bgd),
@@ -856,7 +882,7 @@ DLSYSFUNCS __bgdexport(libmod_3d, functions_exports)[] = {
     FUNC(NULL, NULL, 0, NULL)};
 
 /* Hooks del módulo */
-void __bgdexport(libmod_3d, module_initialize)();
-void __bgdexport(libmod_3d, module_finalize)();
+void __bgdexport( libmod_3d, module_initialize )();
+void __bgdexport( libmod_3d, module_finalize )();
 
 #endif /* __LIBMOD_3D_EXPORTS */

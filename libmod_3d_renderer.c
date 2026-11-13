@@ -4,6 +4,13 @@
  * Core rendering: frustum culling, shadow pass, forward rendering
  */
 
+/* PS5: refresh shadow maps every 2nd frame by default (same look at 50+ fps, ~3 fps cheaper); desktop: every frame. */
+#ifdef __PROSPERO__
+#define G3D_SHADOW_EVERY_DEFAULT 2
+#else
+#define G3D_SHADOW_EVERY_DEFAULT 1
+#endif
+static int g3d_dev_cfg(const char *key, int def);
 #include "libmod_3d_renderer.h"
 #include "libmod_3d_sprite.h"
 #include "libmod_3d_glcaps.h"
@@ -16,6 +23,7 @@
 #include "libmod_3d_light.h"
 #include "libmod_3d_water.h"
 #include "libmod_3d_watersim.h"
+#include "libmod_3d_water_field.h"
 #include "libmod_3d_voxterrain.h"
 #include "libmod_3d_flow.h"
 #include <SDL.h>
@@ -47,6 +55,10 @@
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #include <GL/glext.h>
+
+#ifdef __PROSPERO__
+#include <stdio.h>
+#endif
 #endif
 
 /* ============================================================================
@@ -221,6 +233,8 @@ int g3d_renderer_init(uint32_t width, uint32_t height) {
     g_renderer.initialized = 1;
 
 #ifndef VITA
+    { int mt_ = g3d_dev_cfg("maxtier", -1); if (mt_ >= 0) g3d_glcaps_set_max_tier(mt_); }
+    if (g3d_dev_cfg("renderscale_pct", 0)) g3d_renderer_set_render_scale(g3d_dev_cfg("renderscale_pct", 0) / 100.0f);
     g3d_glcaps_print();   /* GL version, feature flags and the chosen quality tier */
 #endif
     printf("G3D: Renderer initialized\n");
@@ -317,6 +331,7 @@ void g3d_renderer_set_viewport_size(uint32_t w, uint32_t h) {
    1.0 = native. Only useful with an upscaler enabled (see libmod_3d_fsr.c),
    otherwise the image is just stretched. */
 void g3d_renderer_set_render_scale(float scale) {
+    if (g3d_dev_cfg("renderscale_pct", 0)) scale = g3d_dev_cfg("renderscale_pct", 0) / 100.0f;
     if (scale <= 0.0f || scale > 1.0f) scale = 1.0f;
     g_renderer.render_scale = scale;
     update_render_size();
@@ -343,13 +358,45 @@ void g3d_renderer_set_viewport_physical(uint32_t x, uint32_t y, uint32_t w, uint
     g_renderer.vp_h = h;
 }
 
+/* ---- Dev tuning file: /app0/data/g3d.cfg, lines "key=value" (read once). Lets us
+   try quality/perf variants on the console by uploading a text file instead of a
+   new build. Missing file or key = default (feature unchanged). ---- */
+static int g3d_dev_cfg(const char *key, int def) {
+    static int loaded = 0, n = 0;
+    static char keys[16][24]; static int vals[16];
+    if (!loaded) {
+        loaded = 1;
+        FILE *f = fopen("/app0/data/g3d.cfg", "rb");
+        if (f) {
+            char line[96];
+            while (n < 16 && fgets(line, sizeof line, f)) {
+                char *eq = strchr(line, '=');
+                if (!eq || line[0] == '#') continue;
+                *eq = 0;
+                snprintf(keys[n], sizeof keys[n], "%s", line);
+                vals[n] = atoi(eq + 1);
+                printf("G3D: cfg %s=%d\n", keys[n], vals[n]);
+                n++;
+            }
+            fclose(f);
+        }
+    }
+    for (int i = 0; i < n; i++) if (!strcmp(keys[i], key)) return vals[i];
+    return def;
+}
+
+int g3d_dev_cfg_pub(const char *key, int def) { return g3d_dev_cfg(key, def); }
+
 void g3d_renderer_enable_shadows(int enabled, uint32_t resolution) {
+    if (g3d_dev_cfg("noshadow", 0)) enabled = 0;
+    if (g3d_dev_cfg("shadow_res", 0)) resolution = (uint32_t)g3d_dev_cfg("shadow_res", 0);
     g_renderer.shadow_enabled = enabled;
     g_renderer.shadow_map_width = resolution;
     g_renderer.shadow_map_height = resolution;
 }
 
 void g3d_renderer_set_shadows(int enabled) {
+    if (g3d_dev_cfg("noshadow", 0)) enabled = 0;
     g_renderer.shadow_enabled = enabled;
 }
 
@@ -359,6 +406,7 @@ void g3d_renderer_set_shadows(int enabled) {
    almacenamiento mutable (se creo con glTexImage2D), asi que basta reasignarla al
    nuevo tamano; el framebuffer sigue apuntando a la misma id. */
 void g3d_renderer_set_shadow_resolution(uint32_t resolution) {
+    if (g3d_dev_cfg("shadow_res", 0)) resolution = (uint32_t)g3d_dev_cfg("shadow_res", 0);
     if (resolution < 512) resolution = 512;
     if (resolution > 8192) resolution = 8192;
     if (resolution == g_renderer.shadow_map_width) return;
@@ -539,6 +587,11 @@ void g3d_renderer_begin_frame(void) {
 }
 
 void g3d_renderer_shadow_pass(void) {
+    {   /* dev tuning: refresh the sun shadow map only every Nth frame (map + matrix are kept) */
+        static unsigned int n_ = 0;
+        int ev_ = g3d_dev_cfg("shadow_every", G3D_SHADOW_EVERY_DEFAULT);
+        if (ev_ > 1 && (n_++ % (unsigned)ev_)) return;
+    }
     if (!g_renderer.initialized || !g_renderer.shadow_enabled)
         return;
 
@@ -620,6 +673,11 @@ void g3d_renderer_shadow_pass(void) {
 /* Render scene depth from the first spot light's point of view, so its lit cone
    can be tested for occlusion (moving shadows that follow the flashlight). */
 void g3d_renderer_spot_shadow_pass(void) {
+    {   /* same for the torch/spot shadow maps (the caster list is kept between refreshes) */
+        static unsigned int n_ = 0;
+        int ev_ = g3d_dev_cfg("spotshadow_every", G3D_SHADOW_EVERY_DEFAULT);
+        if (ev_ > 1 && (n_++ % (unsigned)ev_)) return;
+    }
     g_renderer.num_shadow_casters = 0;
     if (!g_renderer.initialized || !g_renderer.shadow_enabled)
         return;
@@ -639,9 +697,9 @@ void g3d_renderer_spot_shadow_pass(void) {
         float dd;
         if (l->type == G3D_LIGHT_TYPE_SPOT) dd = -1.0f;   /* spots always included */
         else { Vec3 v = vec3_sub(l->position, cam); dd = v.x*v.x + v.y*v.y + v.z*v.z; }
-        if (ncand < 4) { cand_id[ncand] = light_ids[i]; cand_d[ncand] = dd; ncand++; }
+        if (ncand < G3D_MAX_SC) { cand_id[ncand] = light_ids[i]; cand_d[ncand] = dd; ncand++; }
         else {
-            int worst = 0; for (int k = 1; k < 4; k++) if (cand_d[k] > cand_d[worst]) worst = k;
+            int worst = 0; for (int k = 1; k < G3D_MAX_SC; k++) if (cand_d[k] > cand_d[worst]) worst = k;
             if (dd < cand_d[worst]) { cand_id[worst] = light_ids[i]; cand_d[worst] = dd; }
         }
     }
@@ -746,9 +804,16 @@ uint32_t g3d_renderer_capture_scene(void) {
     }
     glBindTexture(GL_TEXTURE_2D, g_renderer.scene_texture);
     /* Copy the current colour buffer (the opaque scene) into the texture. */
-    if (w != g_renderer.scene_tex_w || h != g_renderer.scene_tex_h) {
-        glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, cx, cy, (GLsizei)w, (GLsizei)h, 0);
+    /* The source is the RGBA16F HDR buffer when HDR is on. Copying it into an
+       8-bit RGB texture is a format conversion the PS5 driver does on the CPU
+       (a 1080p "software-blit", ~140 ms/frame); a matching RGBA16F destination
+       is a plain GPU copy. */
+    GLenum cap_fmt = (g_renderer.hdr_active && g_renderer.hdr_ready && !g3d_dev_cfg("capfmt_rgb", 0)) ? GL_RGBA16F : GL_RGB;
+    static GLenum last_cap_fmt = 0;
+    if (w != g_renderer.scene_tex_w || h != g_renderer.scene_tex_h || cap_fmt != last_cap_fmt) {
+        glCopyTexImage2D(GL_TEXTURE_2D, 0, cap_fmt, cx, cy, (GLsizei)w, (GLsizei)h, 0);
         g_renderer.scene_tex_w = w; g_renderer.scene_tex_h = h;
+        last_cap_fmt = cap_fmt;
     } else {
         glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, cx, cy, (GLsizei)w, (GLsizei)h);
     }
@@ -936,8 +1001,21 @@ static void ensure_hdr_targets(uint32_t w, uint32_t h) {
     g_renderer.hdr_ready = 1;
 }
 
+extern int gr_clear_was_deferred;
+/* The screen clear libbggfx skipped at the start of this frame (see g_frame.c). */
+static void g3d_screen_clear_if_deferred(void) {
+    if (!gr_clear_was_deferred) return;
+    gr_clear_was_deferred = 0;
+    glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.target_fbo);
+    glDisable(GL_SCISSOR_TEST);
+    glViewport(0, 0, g_renderer.display_width, g_renderer.display_height);
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
 void g3d_renderer_resolve_hdr(void) {
     if (!g_renderer.hdr_active || !g_renderer.hdr_ready) return;
+    g3d_screen_clear_if_deferred();
     if (!g_renderer.tonemap_shader) {
         g_renderer.tonemap_shader = g3d_shader_create(post_vert, hdr_resolve_frag);
         g_renderer.bright_shader  = g3d_shader_create(post_vert, hdr_bright_frag);
@@ -1596,10 +1674,112 @@ void g3d_renderer_end_frame(void) {
 #endif
 }
 
+/* Is any of the live height-field water inside the camera's view? The water pass, the scene/depth
+   capture it needs (a 1080p copy the PS5 driver does on the CPU) and the surface draw cost ~7-10 ms a
+   frame even when the lake is behind the camera. The wet cells are grouped in 16x16-cell blocks, each with
+   its own box (one box for a whole lake + river is nearly always partly in view); the blocks are rebuilt a
+   few times a second (the field moves slowly). A sea reaches the horizon and is always "in view". */
+#define WV_BLOCK 16
+#define WV_MAX   256
+static int g_wv_in = 0, g_wv_out = 0, g_wv_n = 0; static float g_wv_boxes[WV_MAX][6];
+static int g3d_waterfield_in_view(G3DCamera *cam) {
+    static unsigned int last_ms = 0;
+    if (!g3d_waterfield_active()) return 0;
+    if (g3d_waterfield_get_sea_level() > G3D_NO_WATER_TEST) return 1;
+    if (g3d_dev_cfg("nowatercull", 0)) return 1;
+    unsigned int now = SDL_GetTicks();
+    if (!last_ms || now - last_ms > 400) {
+        last_ms = now;
+        g_wv_n = 0;
+        int S = g3d_waterfield_side(), grid = S - 1;
+        float ws = g3d_waterfield_world_size(), cell = ws / (float)grid;
+        const float *dep = g3d_waterfield_depth_array(), *ter = g3d_waterfield_terrain_array();
+        int ci0, cj0, ci1, cj1;
+        if (g3d_waterfield_wet_bounds(&ci0, &cj0, &ci1, &cj1)) {
+            for (int bj = cj0 / WV_BLOCK; bj <= cj1 / WV_BLOCK; bj++)
+                for (int bi = ci0 / WV_BLOCK; bi <= ci1 / WV_BLOCK; bi++) {
+                    int i0 = bi * WV_BLOCK, j0 = bj * WV_BLOCK;
+                    int i1 = i0 + WV_BLOCK - 1, j1 = j0 + WV_BLOCK - 1;
+                    if (i1 > grid) i1 = grid;
+                    if (j1 > grid) j1 = grid;
+                    int wi0 = 1 << 30, wi1 = -1, wj0 = 1 << 30, wj1 = -1;
+                    float y0 = 1e30f, y1 = -1e30f;
+                    for (int j = j0; j <= j1; j++)
+                        for (int i = i0; i <= i1; i++) {
+                            int c = j * S + i;
+                            if (dep[c] <= 0.004f) continue;
+                            if (i < wi0) wi0 = i;  if (i > wi1) wi1 = i;
+                            if (j < wj0) wj0 = j;  if (j > wj1) wj1 = j;
+                            if (ter[c] < y0) y0 = ter[c];
+                            if (ter[c] + dep[c] > y1) y1 = ter[c] + dep[c];
+                        }
+                    if (wi1 < 0 || g_wv_n >= WV_MAX) continue;
+                    float *bx = g_wv_boxes[g_wv_n++];
+                    bx[0] = ((float)wi0 / (float)grid - 0.5f) * ws - cell - 3;  bx[3] = ((float)wi1 / (float)grid - 0.5f) * ws + cell + 3;
+                    bx[2] = ((float)wj0 / (float)grid - 0.5f) * ws - cell - 3;  bx[5] = ((float)wj1 / (float)grid - 0.5f) * ws + cell + 3;   /* +3: waves, foam */
+                    bx[1] = y0 - 3; bx[4] = y1 + 3;
+                }
+        }
+    }
+    if (g_wv_n == 0) { g_wv_out++; return 0; }
+    if (!cam) { g_wv_in++; return 1; }
+    for (int k = 0; k < g_wv_n; k++) {
+        const float *bx = g_wv_boxes[k];
+        if (g3d_camera_frustum_contains_aabb(cam, vec3_make(bx[0], bx[1], bx[2]), vec3_make(bx[3], bx[4], bx[5]))) { g_wv_in++; return 1; }
+    }
+    g_wv_out++;
+    return 0;
+}
+
+/* Cheap per-pass CPU timing: G3D_STG(name) charges the time since the previous
+   mark to `name`; the table is printed once every 120 frames (one printf, no GL
+   calls). Compile with -DG3D_STAGE_TRACE for the old glGetError-per-pass trace. */
+#include <time.h>
+static int g_stg_frame = 0;
+#ifdef G3D_STAGE_TRACE
+void g3d_prof_mark_pub(const char *name) { (void)name; }
+#define G3D_STG(n) do { if (g_stg_frame < 3) { GLenum e_ = glGetError(); printf("G3D: STAGE f%d %s glerr=0x%x\n", g_stg_frame, n, (unsigned)e_); } } while (0)
+#else
+#define G3D_STG_MAX 40
+static const char *g_stg_name[G3D_STG_MAX]; static double g_stg_acc[G3D_STG_MAX]; static int g_stg_n = 0;
+static double g_stg_last = 0, g_stg_t0 = 0;
+static double g_stg_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6; }
+static int g_stg_fin = -1;
+#define G3D_STG(n) do { static int idx_ = -1; \
+    if (g_stg_fin < 0) g_stg_fin = g3d_dev_cfg("gpufinish", 0); \
+    if (g_stg_fin) glFinish(); \
+    double t_ = g_stg_now(); \
+    if (idx_ < 0 && g_stg_n < G3D_STG_MAX) { idx_ = g_stg_n++; g_stg_name[idx_] = n; } \
+    if (idx_ >= 0) g_stg_acc[idx_] += t_ - g_stg_last; g_stg_last = t_; } while (0)
+void g3d_prof_mark_pub(const char *name) {
+    int idx = -1;
+    for (int i = 0; i < g_stg_n; i++) if (g_stg_name[i] == name) { idx = i; break; }
+    double t = g_stg_now();
+    if (idx < 0 && g_stg_n < G3D_STG_MAX) { idx = g_stg_n++; g_stg_name[idx] = name; }
+    if (idx >= 0 && g_stg_last > 0) g_stg_acc[idx] += t - g_stg_last;
+    g_stg_last = t;
+}
+static void g_stg_report(void) {
+    double now = g_stg_now(), el = now - g_stg_t0;
+    printf("G3D: PERF %.1f fps (%.1f ms/frame) |", 120000.0 / el, el / 120.0);
+    for (int i = 0; i < g_stg_n; i++) { if (g_stg_acc[i] / 120.0 >= 0.05) printf(" %s=%.2f", g_stg_name[i], g_stg_acc[i] / 120.0); g_stg_acc[i] = 0; }
+    { extern unsigned int g3d_uloc_gl_calls, g3d_uloc_full; static unsigned int last_ = 0;
+      printf(" | glGetUniformLocation/frame=%.1f cache_full_misses=%u", (g3d_uloc_gl_calls - last_) / 120.0, g3d_uloc_full); last_ = g3d_uloc_gl_calls; }
+    printf(" | water in_view=%d culled=%d blocks=%d", g_wv_in, g_wv_out, g_wv_n); g_wv_in = g_wv_out = 0;
+    printf("\n"); g_stg_t0 = now;
+}
+#endif
 void g3d_renderer_render(void) {
+#ifndef G3D_STAGE_TRACE
+    if (g_stg_frame == 0) { g_stg_t0 = g_stg_now(); g_stg_last = g_stg_t0; }
+    G3D_STG("OUTSIDE_3d(script+2d+present)");   /* time since the previous frame's render ended */
+#endif
     g3d_renderer_begin_frame();
+    G3D_STG("r_begin_frame");
     g3d_renderer_shadow_pass();
+    G3D_STG("r_shadow_pass");
     g3d_renderer_spot_shadow_pass();
+    G3D_STG("r_spot_shadow_pass");
     if (g3d_water_reflection_enabled()) {
         g3d_renderer_reflection_pass_plane(0.0f, g3d_water_get_level(), 0.0f,
                                            0.0f, 1.0f, 0.0f,
@@ -1609,40 +1789,64 @@ void g3d_renderer_render(void) {
     }
     /* Visible/near mirrors render the scene mirrored into their textures */
     g3d_mirror_render_reflections(g_renderer.active_camera);
+    G3D_STG("g3d_mirror_render_reflections");
     g3d_renderer_forward_pass();
+    G3D_STG("r_forward_pass");
     /* Instanced vegetation/props (opaque, one draw call per group) */
     g3d_instances_render_all(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_instances_render_all");
     /* Sprites 2D del mundo (personajes estilo HD-2D): van en el pase OPACO, con
        recorte alfa, para que tapen y sean tapados por la geometria sin ordenar. */
     g3d_sprites_render(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_sprites_render");
     /* Depth now holds the opaque occluders: test every entity's box against it
        so the next frame can skip whatever is fully hidden. */
     {
         int occ_n = 0;
         int *occ_e = g3d_scene_impl_get_entities(&occ_n);
         g3d_occlusion_pass(g_renderer.active_camera, occ_e, occ_n, g_renderer.flip_y);
+    G3D_STG("g3d_occlusion_pass");
     }
     /* Sky fills the background after opaque geometry (depth LEQUAL, far plane) */
     g3d_sky_render_pass(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_sky_render_pass");
     /* Mirror surfaces (opaque) sample their reflection textures */
     g3d_mirror_render_surfaces(g_renderer.active_camera, g_renderer.flip_y);
     /* SSAO from the opaque depth (before transparent water) -> applied in the resolve */
     g3d_renderer_ssao_pass();
+    G3D_STG("r_ssao_pass");
     /* World-space volumetric low clouds (fly-through), composited over opaque + sky */
     g3d_renderer_cloud_pass();
+    G3D_STG("r_cloud_pass");
     /* Semi-transparent entities (alpha blended) AFTER opaque + sky so they aren't
        repainted by the sky where there's no opaque geometry behind them. */
     g3d_renderer_transparent_pass();
+    G3D_STG("r_transparent_pass");
     /* Transparent water + flows after the opaque pass (same Y-flip for GRAPH).
        Grab the opaque scene first so the water can refract it. */
     g3d_water_tick();   /* re-emit ripples at registered sources (river mouths) */
     g3d_water_update_underwater(g_renderer.active_camera); /* camera-submerged? */
-    if (g3d_water_is_enabled() || g3d_fluid_count() > 0 || g3d_watersim_active() || g3d_voxwater_active()) {
+    int field_in_view = g3d_watersim_active() ? g3d_waterfield_in_view(g_renderer.active_camera) : 0;
+    if (!g3d_dev_cfg("nocapture", 0) && (g3d_water_is_enabled() || g3d_fluid_count() > 0 || (g3d_watersim_active() && field_in_view) || g3d_voxwater_active())) {
         g3d_renderer_capture_scene();
-        g3d_renderer_capture_depth();   /* for screen-space reflections in the water */
+        G3D_STG("capture_scene");
+        {   /* the depth copy is a CPU-side blit on the PS5 (~2.3 ms): refresh it every 2nd frame, the water only
+               uses it for refraction/soft edges (default 2 on PS5, 1 elsewhere; cfg depth_every) */
+            static unsigned int dn = 0;
+#ifdef __PROSPERO__
+            int de = g3d_dev_cfg("depth_every", 2);
+#else
+            int de = g3d_dev_cfg("depth_every", 1);
+#endif
+            if (de <= 1 || (dn++ % (unsigned)de) == 0 || !g3d_renderer_scene_depth_texture())
+                g3d_renderer_capture_depth();   /* for screen-space reflections in the water */
+        }
+        G3D_STG("capture_depth");
     }
-    g3d_water_render_pass(g_renderer.active_camera, g_renderer.flip_y);
+    if (!g3d_dev_cfg("nowater", 0)) g3d_water_render_pass(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_water_render_pass");
     g3d_fluid_render_pass(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_fluid_render_pass");
     /* live height-field water sim (unified lakes+rivers): advance + draw.
        On voxel terrain the 3D voxel water owns everything -> don't draw the 2.5D. */
     if (g3d_watersim_active() && !g3d_voxterrain_active()) {
@@ -1652,11 +1856,13 @@ void g3d_renderer_render(void) {
         wsim_last = now;
         if (dt > 0.1f) dt = 0.1f;
         g3d_watersim_step(dt);
+    G3D_STG("watersim_step");
         /* Droplets at the foot of the falls and off anything solid standing in
            moving water. Before the particle pass below, so they are drawn the
            same frame they are born. */
         g3d_water_splash_tick(dt);
-        g3d_watersim_render(g_renderer.active_camera, g_renderer.flip_y);
+        if (field_in_view) g3d_watersim_render(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("watersim_render");
     }
     /* 3D voxel water (fills caves, waterfalls): advance + draw */
     if (g3d_voxwater_active()) {
@@ -1669,11 +1875,21 @@ void g3d_renderer_render(void) {
         g3d_voxwater_render(g_renderer.active_camera, g_renderer.flip_y);
     }
     g3d_flow_render_pass(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_flow_render_pass");
     g3d_particles_update_render(g_renderer.active_camera, g_renderer.flip_y);
+    G3D_STG("g3d_particles_update_render");
     g3d_fire_render(g_renderer.active_camera, g_renderer.flip_y);   /* torch/campfire flames */
+    G3D_STG("fire");
     g3d_renderer_underwater_pass();   /* fullscreen tint+wobble if camera is submerged */
+    G3D_STG("underwater");
     g3d_renderer_resolve_hdr();       /* HDR + bloom -> host FBO (no-op if HDR off) */
+    G3D_STG("resolve_hdr");
     g3d_renderer_end_frame();
+    G3D_STG("r_end_frame");
+    g_stg_frame++;
+#ifndef G3D_STAGE_TRACE
+    if (g_stg_frame % 120 == 0) g_stg_report();
+#endif
 }
 
 /* ============================================================================

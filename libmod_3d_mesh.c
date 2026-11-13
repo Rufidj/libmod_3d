@@ -10,6 +10,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <math.h>
+#include <SDL.h>
 
 #ifndef VITA
 #define GL_GLEXT_PROTOTYPES
@@ -106,20 +107,30 @@ void g3d_mesh_calculate_bounds(G3DMesh *mesh) {
    ============================================================================
  */
 
+#include <time.h>
+static double g3d_mesh_prof_now(void) {
+    struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t);
+    return (double)t.tv_sec * 1000.0 + (double)t.tv_nsec / 1e6;
+}
 int g3d_mesh_upload_gpu(G3DMesh *mesh) {
     if (!mesh || mesh->gpu_uploaded)
         return 1;  /* Already uploaded */
+    Uint32 up_t0 = SDL_GetTicks();
+    double T[8]; int ti = 0; T[ti++] = g3d_mesh_prof_now();
 
 #ifndef VITA
     /* Create VAO */
     glGenVertexArrays(1, &mesh->vao);
     glBindVertexArray(mesh->vao);
+    T[ti++] = g3d_mesh_prof_now();   /* 1: after genVAO+bindVAO */
 
     /* Create VBO (vertex buffer) */
     glGenBuffers(1, &mesh->vbo);
     glBindBuffer(GL_ARRAY_BUFFER, mesh->vbo);
+    T[ti++] = g3d_mesh_prof_now();   /* 2: after genBuffer+bind */
     glBufferData(GL_ARRAY_BUFFER, mesh->vertex_count * sizeof(G3DVertex),
                  mesh->vertices, GL_STATIC_DRAW);
+    T[ti++] = g3d_mesh_prof_now();   /* 3: after VBO glBufferData */
 
     /* Vertex attributes */
     /* Position (location 0) */
@@ -139,15 +150,22 @@ int g3d_mesh_upload_gpu(G3DMesh *mesh) {
 
     /* Create EBO (element buffer) */
     glGenBuffers(1, &mesh->ebo);
+    T[ti++] = g3d_mesh_prof_now();   /* 4: after attribs */
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->ebo);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, mesh->index_count * sizeof(uint32_t),
                  mesh->indices, GL_STATIC_DRAW);
+    T[ti++] = g3d_mesh_prof_now();   /* 5: after EBO glBufferData */
 
     /* Unbind VAO */
     glBindVertexArray(0);
+    T[ti++] = g3d_mesh_prof_now();   /* 6: end */
+    { static int n = 0; if (n++ < 12) printf("G3D: PROF upload#%d v=%u i=%u: vao=%.1f genbuf=%.1f vbo=%.1f attribs=%.1f ebo=%.1f unbind=%.1f ms\n", n, mesh->vertex_count, mesh->index_count, T[1]-T[0], T[2]-T[1], T[3]-T[2], T[4]-T[3], T[5]-T[4], T[6]-T[5]); }
 
     mesh->gpu_uploaded = 1;
 
+    printf("G3D: TIMING upload v=%u i=%u bytes=%u ms=%u\n", mesh->vertex_count, mesh->index_count,
+           (unsigned)(mesh->vertex_count * sizeof(G3DVertex) + mesh->index_count * sizeof(uint32_t)),
+           (unsigned)(SDL_GetTicks() - up_t0));
     printf("G3D: Mesh uploaded to GPU (VAO=%u, VBO=%u, EBO=%u)\n", mesh->vao,
            mesh->vbo, mesh->ebo);
 

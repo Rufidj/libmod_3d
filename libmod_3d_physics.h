@@ -135,6 +135,7 @@ int  g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, 
    es para lo que no se mueve (paredes, suelos, un nivel); la envolvente convexa
    para lo que si (un barril, una caja): se ajusta al modelo sin dar tamanios. */
 int  g3d_collider_add_model(void *model, float x, float y, float z, float scale);
+int  g3d_collider_add_model_yaw(void *model, float x, float y, float z, float scale, float yaw_deg);
 int  g3d_rigidbody_create_convex_model(float x, float y, float z,
                                        void *model, float scale, float mass);
 

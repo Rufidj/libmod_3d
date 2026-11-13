@@ -33,22 +33,15 @@ extern "C" {
 
 /* --------------------------------------------------------------------------- */
 
-#if !defined(__BGDC__)
-enum {
-    CSUBTYPE = 0,
-    COORDX,
-    COORDY,
-    COORDZ,
-    ANGLE_X,
-    ANGLE_Y,
-    ANGLE_Z,
-    SIZE,
-    SIZE_X,
-    SIZE_Y,
-    SIZE_Z,
-    ENTITY
-};
-#endif
+/* (an unused enum with these names - CSUBTYPE/COORDX/COORDY/COORDZ/ANGLE_X/
+ * ANGLE_Y/ANGLE_Z/SIZE/SIZE_X/SIZE_Y/SIZE_Z/ENTITY - used to live here.
+ * Nothing in this module ever referenced it: libmod_3d.c defines and uses
+ * its own properly-scoped LOC3D_CSUBTYPE/LOC3D_COORDX/LOC3D_COORDY/
+ * LOC3D_COORDZ enum instead. Removed because the first four names collided
+ * with libbggfx.h's own (differently-valued) locals enum of the same names
+ * whenever both headers were included in the same translation unit - the
+ * only such case being libmod_3d.c itself, since libbggfx.h is included a
+ * few lines above this. ) */
 
 /* ============================================================================
    CONSTANTS

@@ -10,6 +10,7 @@
 #include "libmod_3d_terrain.h"
 #include "libmod_3d_chunkterrain.h"   /* g3d_heightfield_height */
 #include "libmod_3d_scene.h"
+#include "libmod_3d_scenefile.h"   /* g3d_scene_heightfield */
 #include "libmod_3d_light.h"
 #include "libmod_3d_water.h"   /* g3d_water_add_ripple_source (salpicadura al pie) */
 #include <stdio.h>

@@ -3,6 +3,7 @@
  */
 
 #include "libmod_3d_scene.h"
+#include "libmod_3d_entity.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,10 @@ int g3d_scene_impl_destroy(int scene_id) {
         return 0;
 
     G3DScene *scene = &g_scenes[scene_id];
+
+    /* Las entidades de la escena se van con ella: si no, se quedan activas (y, p. ej., ocluyen lo de la escena siguiente) */
+    if (scene->entity_ids)
+        while (scene->entity_count > 0 && scene->entity_ids[scene->entity_count - 1] >= 0 && g3d_entity_impl_destroy(scene->entity_ids[scene->entity_count - 1])) {}
 
     if (scene->entity_ids)
         free(scene->entity_ids);

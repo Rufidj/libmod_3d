@@ -6,6 +6,18 @@
  */
 
 #ifndef __LIBMOD_3D_SHADER_H
+/* How many torch/spot lights can cast a dynamic shadow at once. Each one costs a
+   fragment-shader sampler in the main lit shader, and PS5's GL only allows 16
+   samplers per fragment shader (the shader needs 14 + this). */
+#ifndef G3D_MAX_SC
+#  ifdef __PROSPERO__
+#    define G3D_MAX_SC 2
+#  else
+#    define G3D_MAX_SC 4
+#  endif
+#endif
+#define G3D_STR_(x) #x
+#define G3D_STR(x) G3D_STR_(x)
 #define __LIBMOD_3D_SHADER_H
 
 #include "libmod_3d_math.h"

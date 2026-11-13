@@ -68,7 +68,7 @@ static G3DModel *sc_load_model(const char *asset) {
     const char *dot = strrchr(asset, '.');
     if (dot && (strcmp(dot, ".fbx") == 0 || strcmp(dot, ".FBX") == 0))
         return g3d_fbx_load(path);
-    return g3d_gltf_load(path);
+    return g3d_gltf_load_shared(path);
 }
 
 /* Une varias submallas en una sola. Un modelo descargado viene partido por

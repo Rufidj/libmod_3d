@@ -14,6 +14,7 @@
 #include "libmod_3d_renderer.h"
 #include "libmod_3d_particles.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <math.h>
 
 #include <SDL.h>

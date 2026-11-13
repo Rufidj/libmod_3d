@@ -253,6 +253,7 @@ void g3d_waterfield_flow_arrays(const float **vx, const float **vz) {
 }
 unsigned int g3d_waterfield_revision(void)      { return W.revision; }
 
+
 /* --------------------------------------------------------------------------
    Sources
    -------------------------------------------------------------------------- */

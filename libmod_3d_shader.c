@@ -8,6 +8,7 @@
 #include "libmod_3d_glcaps.h"
 #include "libmod_3d_cloud_glsl.h"
 #include <stdio.h>
+#include <SDL.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -100,8 +101,47 @@ static int g3d_shader_compile(G3DShader *shader) {
 #endif
 }
 
-G3DShaderProgram *g3d_shader_create(const char *vert_source,
-                                     const char *frag_source) {
+/* PS5: the shader driver links each program slowly and modules request the
+ * same source many times (glTF submeshes, water, sky). Keep one program per
+ * distinct source pair and never free it through g3d_shader_free. */
+#if defined(__PROSPERO__)
+#define G3D_SHADER_CACHE_MAX 128
+typedef struct { char *vs; char *fs; G3DShaderProgram *prog; } G3DShaderCacheEntry;
+static G3DShaderCacheEntry g3d_shader_cache[G3D_SHADER_CACHE_MAX];
+static int g3d_shader_cache_count = 0;
+
+static int g3d_shader_is_cached(G3DShaderProgram *program) {
+    for (int i = 0; i < g3d_shader_cache_count; i++)
+        if (g3d_shader_cache[i].prog == program) return 1;
+    return 0;
+}
+#endif
+
+static G3DShaderProgram *g3d_shader_create_uncached(const char *vert_source, const char *frag_source);
+
+G3DShaderProgram *g3d_shader_create(const char *vert_source, const char *frag_source) {
+#if defined(__PROSPERO__)
+    for (int i = 0; i < g3d_shader_cache_count; i++) {
+        if (strcmp(g3d_shader_cache[i].vs, vert_source) == 0 && strcmp(g3d_shader_cache[i].fs, frag_source) == 0)
+            return g3d_shader_cache[i].prog;
+    }
+#endif
+    Uint32 sp_t0 = SDL_GetTicks();
+    G3DShaderProgram *prog = g3d_shader_create_uncached(vert_source, frag_source);
+    printf("G3D: TIMING shader %ums frag=\"%.40s\"\n", (unsigned)(SDL_GetTicks() - sp_t0),
+           frag_source ? frag_source : "?");
+#if defined(__PROSPERO__)
+    if (prog && g3d_shader_cache_count < G3D_SHADER_CACHE_MAX) {
+        g3d_shader_cache[g3d_shader_cache_count].vs = strdup(vert_source);
+        g3d_shader_cache[g3d_shader_cache_count].fs = strdup(frag_source);
+        g3d_shader_cache[g3d_shader_cache_count].prog = prog;
+        g3d_shader_cache_count++;
+    }
+#endif
+    return prog;
+}
+
+static G3DShaderProgram *g3d_shader_create_uncached(const char *vert_source, const char *frag_source) {
     G3DShaderProgram *program =
         (G3DShaderProgram *)malloc(sizeof(G3DShaderProgram));
     if (!program)
@@ -284,6 +324,10 @@ void g3d_shader_image_barrier(void) {}
 void g3d_shader_free(G3DShaderProgram *program) {
     if (!program)
         return;
+#if defined(__PROSPERO__)
+    if (g3d_shader_is_cached(program))
+        return;
+#endif
 
 #ifndef VITA
     if (program->vertex_shader.id)
@@ -317,6 +361,7 @@ static unsigned int uniform_hash(const char *s) {
     return h;
 }
 
+unsigned int g3d_uloc_gl_calls = 0, g3d_uloc_full = 0;
 int g3d_shader_get_uniform(G3DShaderProgram *program, const char *name) {
     if (!program || !program->linked)
         return -1;
@@ -334,6 +379,7 @@ int g3d_shader_get_uniform(G3DShaderProgram *program, const char *name) {
     /* Not in cache, ask GL */
 #ifndef VITA
     int location = glGetUniformLocation(program->id, name);
+    g3d_uloc_gl_calls++;
 #else
     int location = -1;
 #endif
@@ -341,6 +387,7 @@ int g3d_shader_get_uniform(G3DShaderProgram *program, const char *name) {
     /* Cache the answer even when it's -1: a uniform the shader doesn't have
        (or that got optimised out) is asked for on every draw too, and each miss
        is a driver-side string lookup. */
+    if (program->uniform_count >= G3D_MAX_UNIFORMS) g3d_uloc_full++;
     if (program->uniform_count < G3D_MAX_UNIFORMS) {
         program->uniform_locations[program->uniform_count] = location;
         program->uniform_hashes[program->uniform_count] = h;
@@ -579,7 +626,7 @@ uniform float uPLCosOut[MAX_PL];  // cos(outer cone half-angle)
 
 // Dynamic shadow maps for up to 4 spot/point lights (torches). Each shadows the point
 // light in uPL slot uCasterSlot[k].
-#define MAX_SC 4
+)glsl" "#define MAX_SC " G3D_STR(G3D_MAX_SC) "\n" R"glsl(
 uniform sampler2D uSpotShadowMap[MAX_SC];
 uniform mat4 uSpotLightSpaceMatrix[MAX_SC];
 uniform int uCasterSlot[MAX_SC];
@@ -867,8 +914,10 @@ void main() {
     if (uSpotShadowEnabled == 1) {
         if (0 < uNumShadowCasters) casterMul[0] = 1.0 - calcCasterShadow(uSpotShadowMap[0], uSpotLightSpaceMatrix[0]);
         if (1 < uNumShadowCasters) casterMul[1] = 1.0 - calcCasterShadow(uSpotShadowMap[1], uSpotLightSpaceMatrix[1]);
+#if MAX_SC > 2
         if (2 < uNumShadowCasters) casterMul[2] = 1.0 - calcCasterShadow(uSpotShadowMap[2], uSpotLightSpaceMatrix[2]);
         if (3 < uNumShadowCasters) casterMul[3] = 1.0 - calcCasterShadow(uSpotShadowMap[3], uSpotLightSpaceMatrix[3]);
+#endif
     }
 
     // Direct: point / spot lights

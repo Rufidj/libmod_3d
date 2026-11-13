@@ -248,7 +248,12 @@ void g3d_rigidbody_set_ccd(int id, int enabled) {
 
 /* Malla exacta (triangulo a triangulo) de todas las submallas: paredes, suelos,
    escaleras, un nivel entero. No se mueve nunca (Jolt no admite malla movil). */
+int g3d_collider_add_model_yaw(void *model, float x, float y, float z, float scale, float yaw_deg);
 int g3d_collider_add_model(void *model, float x, float y, float z, float scale) {
+    return g3d_collider_add_model_yaw(model, x, y, z, scale, 0.0f);
+}
+/* Igual, con la malla girada yaw_deg grados alrededor de Y (una pista importada que hay que orientar) */
+int g3d_collider_add_model_yaw(void *model, float x, float y, float z, float scale, float yaw_deg) {
     jolt_init();
     int nsub = g3d_physics_submesh_count(model);
     if (nsub <= 0) return -1;
@@ -273,7 +278,7 @@ int g3d_collider_add_model(void *model, float x, float y, float z, float scale) 
     ShapeSettings::ShapeResult r = ms.Create();
     if (r.HasError()) return -1;
 
-    BodyCreationSettings bcs(r.Get(), RVec3(x, y, z), Quat::sIdentity(),
+    BodyCreationSettings bcs(r.Get(), RVec3(x, y, z), Quat::sRotation(Vec3::sAxisY(), yaw_deg * 0.017453292f),
                              EMotionType::Static, Layers::NON_MOVING);
     bcs.mFriction = 0.6f;
     BodyInterface &bi = g_ps->GetBodyInterface();
@@ -468,6 +473,11 @@ void g3d_jolt_char_push(float *px, float py, float *pz, float radius, float heig
     for (int i = 0; i < JRB_MAX; i++) {
         JRBody &b = g_rb[i];
         if (!b.active) continue;
+        /* Las mallas estaticas del nivel (g3d_collider_add_model/mesh) tambien estan en g_rb, con tamano 0
+           y en el origen del mundo: sin este filtro actuaban como un poste invisible en (0,0) que
+           impedia al personaje pasar a menos de su radio cuando su altura era <= 0 (dependia del ruido
+           de coma flotante). El nivel ya lo resuelven el deslizamiento de la capsula y el rayo al suelo. */
+        if (bi.GetMotionType(b.id) == EMotionType::Static) continue;
         RVec3 bp = bi.GetPosition(b.id);
         float dx = (float)bp.GetX() - *px, dz = (float)bp.GetZ() - *pz;
         float br = b.hx > b.hz ? b.hx : b.hz;

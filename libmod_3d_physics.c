@@ -417,6 +417,9 @@ void g3d_char_update(int id, float dt) {
     float nlen = sqrtf(nx*nx + ny*ny + nz*nz); if (nlen < 1e-5f) nlen = 1.0f;
     float slope_y = ny / nlen;                                /* 1 = flat, small = steep */
     int steep = slope_y < c->slope_cos;
+    /* de pie sobre una superficie que NO es el terreno (una carretera, una plataforma sobre el relieve): la pendiente del
+       terreno de debajo no cuenta, si no el personaje resbala o se frena en una cuesta por la que la carretera es llana */
+    if (steep && c->py > g3d_scene_terrain_height(c->px, c->pz) + 0.25f) steep = 0;
 
     /* horizontal control: full control on walkable ground, momentum + light
        air control otherwise, downhill slide on steep ground. */

@@ -8,9 +8,11 @@
 #include "libmod_3d.h"
 #include "libmod_3d_scene.h"
 #include "libmod_3d_entity.h"
+
 #include "libmod_3d_material.h"
 #include "libmod_3d_light.h"
 #include "libmod_3d_primitives.h"
+#include "libmod_3d_lvl.h"
 #include "libmod_3d_terrain.h"
 #include "libmod_3d_zone.h"
 #include "libmod_3d_water.h"
@@ -118,7 +120,7 @@ enum {
     LOC3D_SPR_FRAME
 };
 
-DLVARFIXUP __bgdexport(libmod_3d, locals_fixup)[] = {
+DLVARFIXUP __bgdexport( libmod_3d, locals_fixup )[] = {
     { "csubtype"  , NULL, -1, -1 },
     { "x"         , NULL, -1, -1 },
     { "y"         , NULL, -1, -1 },
@@ -199,6 +201,22 @@ int g3d_engine_init(int width, int height) {
 
     g_3d_initialized = 1;
     printf("G3D: Engine initialized successfully\n");
+    {   /* dev tuning (g3d.cfg): fsr_height=<px> renders at that height and upscales with FSR 1 */
+        extern int g3d_dev_cfg_pub(const char *key, int def);
+        int fh = g3d_dev_cfg_pub("fsr_height", 0);
+        if (fh > 0) {
+            int sharp = g3d_dev_cfg_pub("fsr_sharp_pct", 20);
+            uint32_t dw = 0, dh = 0;
+            g3d_renderer_get_display_size(&dw, &dh);
+            if (dh > 0) {
+                float sc = (float)fh / (float)dh; if (sc > 1.0f) sc = 1.0f;
+                g3d_fsr_set_enabled(1);
+                g3d_fsr_set_sharpness(sharp / 100.0f);
+                g3d_renderer_set_render_scale(sc);
+                printf("G3D: cfg FSR on: render %d of %u (scale %.3f, sharp %.2f)\n", fh, dh, sc, sharp / 100.0f);
+            }
+        }
+    }
 
     return 1;
 }
@@ -363,6 +381,18 @@ int64_t g3d_entity_set_blend_bgd(INSTANCE *my, int64_t *params) {
     return g3d_entity_impl_set_blend((int)params[0], (int)params[1]);
 }
 
+/* X-ray: g3d_entity_set_xray(entidad, 1) marca un muro; g3d_xray_update(camara, objetivo, radio, alfa_minimo, velocidad)
+   se llama una vez por frame y desvanece los marcados que tapan al objetivo. */
+int64_t g3d_entity_set_xray_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_entity_impl_set_xray((int)params[0], (int)params[1]);
+}
+int64_t g3d_xray_update_bgd(INSTANCE *my, int64_t *params) {
+    float v[9];
+    for (int i = 0; i < 9; i++) v[i] = *(float *)&params[i];
+    g3d_xray_update(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[7], v[8]);
+    return 1;
+}
+
 int64_t g3d_entity_set_parent_bgd(INSTANCE *my, int64_t *params) {
     int entity_id = (int)params[0];
     int parent_id = (int)params[1];
@@ -458,6 +488,48 @@ int64_t g3d_entity_set_mesh_bgd(INSTANCE *my, int64_t *params) {
 /* Primitive mesh creation */
 int64_t g3d_primitive_cube_bgd(INSTANCE *my, int64_t *params) {
     G3DMesh *mesh = g3d_primitive_create_cube();
+    if (!mesh)
+        return -1;
+    g3d_mesh_upload_gpu(mesh);
+    return (int64_t)(intptr_t)mesh;
+}
+
+/* Columna de `blocks` bloques de alto con la textura repetida por bloque (ver g3d_primitive_create_column). */
+int64_t g3d_primitive_column_bgd(INSTANCE *my, int64_t *params) {
+    G3DMesh *mesh = g3d_primitive_create_column((int)params[0]);
+    if (!mesh)
+        return -1;
+    g3d_mesh_upload_gpu(mesh);
+    return (int64_t)(intptr_t)mesh;
+}
+
+/* ---- Niveles binarios (.lvl): ver libmod_3d_lvl.h ---- */
+int64_t g3d_lvl_load_bgd(INSTANCE *my, int64_t *params) {
+    const char *path = (const char *)string_get(params[0]);
+    G3DLvl *l = g3d_lvl_load(path);
+    string_discard(params[0]);
+    return l ? (int64_t)(intptr_t)l : 0;
+}
+int64_t g3d_lvl_free_bgd(INSTANCE *my, int64_t *params) { g3d_lvl_free((G3DLvl *)(intptr_t)params[0]); return 1; }
+int64_t g3d_lvl_planes_bgd(INSTANCE *my, int64_t *params) { return g3d_lvl_plane_count((G3DLvl *)(intptr_t)params[0]); }
+int64_t g3d_lvl_w_bgd(INSTANCE *my, int64_t *params) { return g3d_lvl_width((G3DLvl *)(intptr_t)params[0], (int)params[1]); }
+int64_t g3d_lvl_h_bgd(INSTANCE *my, int64_t *params) { return g3d_lvl_height((G3DLvl *)(intptr_t)params[0], (int)params[1]); }
+int64_t g3d_lvl_cell_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_lvl_cell((G3DLvl *)(intptr_t)params[0], (int)params[1], (int)params[2], (int)params[3], (int)params[4]);
+}
+
+int64_t g3d_lvl_links_bgd(INSTANCE *my, int64_t *params) {
+    int64_t str = string_new(g3d_lvl_links((G3DLvl *)(intptr_t)params[0]));
+    string_use(str);
+    return str;
+}
+
+/* Padre de creacion: lo que se cree despues cuelga de esa entidad (-1 = nada). Ver g3d_entity_impl_set_spawn_parent. */
+int64_t g3d_set_spawn_parent_bgd(INSTANCE *my, int64_t *params) { g3d_entity_impl_set_spawn_parent((int)params[0]); return 1; }
+
+/* Cuña / rampa que sube hacia +x (ver g3d_primitive_create_wedge). */
+int64_t g3d_primitive_wedge_bgd(INSTANCE *my, int64_t *params) {
+    G3DMesh *mesh = g3d_primitive_create_wedge();
     if (!mesh)
         return -1;
     g3d_mesh_upload_gpu(mesh);
@@ -663,7 +735,7 @@ int64_t g3d_tr_probe_bgd(INSTANCE *my, int64_t *params) {
 int64_t g3d_model_load_gltf_bgd(INSTANCE *my, int64_t *params) {
     g3d_ensure_init();
     const char *filename = (const char *)string_get(params[0]);
-    G3DModel *model = g3d_gltf_load(filename);
+    G3DModel *model = g3d_gltf_load_shared(filename);   /* static props shared */
     string_discard(params[0]);
     if (!model)
         return -1;
@@ -2538,16 +2610,29 @@ int64_t g3d_collider_add_box_bgd(INSTANCE *my, int64_t *params) {
                                 *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
 }
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params) { g3d_collider_clear(); return 1; }
-/* La colision del modelo entero: exacta (fija) o su envolvente (se mueve). */
+/* La colision del modelo entero: exacta (fija) o su envolvente (se mueve).
+   Ambas son solo-Jolt (implementadas en libmod_3d_jolt.cpp); con USE_JOLT
+   apagado (hoy PS5, mientras se porta Jolt por separado) no hay a que
+   llamar, asi que degradan a "no se pudo" en vez de dejar sin definir. */
+#ifdef USE_JOLT
 int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params) {
     return g3d_collider_add_model((void*)(intptr_t)params[0], *(float*)&params[1],
                                   *(float*)&params[2], *(float*)&params[3], *(float*)&params[4]);
+}
+int64_t g3d_collider_add_model_yaw_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_collider_add_model_yaw((void*)(intptr_t)params[0], *(float*)&params[1], *(float*)&params[2],
+                                      *(float*)&params[3], *(float*)&params[4], *(float*)&params[5]);
 }
 int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params) {
     return g3d_rigidbody_create_convex_model(*(float*)&params[0], *(float*)&params[1],
                                              *(float*)&params[2], (void*)(intptr_t)params[3],
                                              *(float*)&params[4], *(float*)&params[5]);
 }
+#else
+int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
+int64_t g3d_collider_add_model_yaw_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
+int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
+#endif
 /* ---- Deshacer una escena para montar otra ----
    Estas cuatro existian en C pero no estaban en la lista de BennuGD2, asi que un
    juego que cambia de mapa no podia soltar la vegetacion, las zonas pintadas, los
@@ -2664,9 +2749,12 @@ int64_t g3d_rigidbody_render_y_bgd(INSTANCE *my, int64_t *params) { float v = g3
 int64_t g3d_rigidbody_render_z_bgd(INSTANCE *my, int64_t *params) { float v = g3d_rigidbody_render_z((int)params[0]); return (int64_t) * (int32_t *)&v; }
 
 
+extern void g3d_prof_mark_pub(const char *name);
 static int g3d_object_info(void *what, REGION *clip, int64_t *key, int64_t *ready) {
+    g3d_prof_mark_pub("A_script_exec+frame_start");
     *key = INT64_MAX; /* Highest Z -> draws first / at the bottom */
     *ready = 1;
+    { static int n = 0; if (n < 4) { n++; printf("G3D: object_info #%d scaled=%dx%d init=%d\n", n, (int)renderer_scaled_width, (int)renderer_scaled_height, g_3d_initialized); } }
 
     if (!renderer_scaled_width || !renderer_scaled_height)
         return 0;
@@ -2683,7 +2771,10 @@ static int g3d_object_info(void *what, REGION *clip, int64_t *key, int64_t *read
     return 1;
 }
 
+extern int gr_defer_clear;
 static void g3d_object_draw(void *what, REGION *clip) {
+    g3d_prof_mark_pub("B_info_to_draw(2d_below)");
+    { static int n = 0; if (n < 4) { n++; printf("G3D: object_draw #%d init=%d\n", n, g_3d_initialized); } }
     if (g_3d_initialized) {
         /* Flush any queued 2D rendering (e.g. GPU_Clear or background map) */
         GPU_FlushBlitBuffer();
@@ -2693,7 +2784,11 @@ static void g3d_object_draw(void *what, REGION *clip) {
 
         /* Reset SDL_gpu state so 2D sprites can draw correctly on top */
         GPU_ResetRendererState();
+#ifdef __PROSPERO__
+        gr_defer_clear = 1;   /* next frame: the 3D resolve clears the screen late (see g_frame.c) */
+#endif
     }
+    g3d_prof_mark_pub("C_after_3d_reset");
 }
 
 /* ============================================================================
@@ -2786,6 +2881,14 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
             int64_t ggraph = LOCINT64( libmod_3d, i, LOC3D_GRAPH );
             if ( ggraph ) {
                 GRAPH * gr = bitmap_get( gfile, ggraph );
+#ifdef USE_SDL2_GPU
+                /* gr->tex is SDL_gpu's GPU_Image (w/h/texture_w/texture_h and
+                   GPU_GetTextureHandle) - only exists in that representation
+                   when BennuGD2 itself renders through SDL_gpu. On a plain
+                   USE_SDL2 build gr->tex is a different, opaque type, so this
+                   C3D_SPRITE texture bridge has nothing to attach to there;
+                   the sprite still gets position/scale/tint/frame above, it
+                   just renders untextured instead of using its 2D graphic. */
                 if ( gr && gr->tex ) {
                     /* La textura puede ser mayor que el grafico (relleno a
                        potencia de dos), asi que el recorte va en proporcion. */
@@ -2803,6 +2906,9 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
                                                (float) gr->cpoints[0].x / (float) gr->width,
                                                (float) gr->cpoints[0].y / (float) gr->height );
                 }
+#else
+                (void) gr;
+#endif
             }
             break;
         }
@@ -2933,13 +3039,14 @@ static void g3d_process_instance_hook( INSTANCE * i ) {
 
 }
 
-void __bgdexport(libmod_3d, module_initialize)() {
+void __bgdexport( libmod_3d, module_initialize )() {
+    printf("G3D: module_initialize\n");
     g3d_engine_obj_id = gr_new_object(INT64_MAX, g3d_object_info, g3d_object_draw, NULL);
     /* Register per-process hook for all C_3D instances */
     gr_register_instance_ctype_hook( C_3D_CTYPE, g3d_process_instance_hook );
 }
 
-void __bgdexport(libmod_3d, module_finalize)() {
+void __bgdexport( libmod_3d, module_finalize )() {
     if (g3d_engine_obj_id) {
         gr_destroy_object(g3d_engine_obj_id);
         g3d_engine_obj_id = 0;

@@ -42,6 +42,9 @@ extern "C" {
  *   }
  */
 G3DModel *g3d_gltf_load(const char *filepath);
+/* Same as g3d_gltf_load, but one shared model per path (for map placement;
+   see libmod_3d_gltf.c). Never free the result. */
+G3DModel *g3d_gltf_load_shared(const char *filepath);
 
 /* Toggle X/Z re-centering of loaded models (default on). Turn OFF before loading
    world/map sectors whose geometry is baked at absolute world coordinates. */
@@ -67,6 +70,7 @@ void g3d_gltf_set_chunking(float cell);
  * Free glTF model and all associated resources
  */
 void g3d_gltf_free(G3DModel *model);
+G3DModel *g3d_gltf_unshare(const char *filepath);   /* saca un modelo de la cache compartida y lo devuelve */
 
 /* ============================================================================
    glTF FEATURES SUPPORTED

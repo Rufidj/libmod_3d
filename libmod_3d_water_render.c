@@ -12,6 +12,7 @@
  * just different values in the same field.
  */
 
+extern int g3d_dev_cfg_pub(const char *key, int def);   /* /app0/data/g3d.cfg dev tuning, see libmod_3d_renderer.c */
 #include "libmod_3d_water_render.h"
 #include "libmod_3d_water_field.h"
 #include "libmod_3d_water_shaders.h"
@@ -162,7 +163,7 @@ static void wr_preamble(char *out, size_t n, int tess, int frag) {
     else                                        version = "#version 330 core\n";
 
     int ibl = (c->tier >= G3D_TIER_MID);
-    int ssr = (c->tier >= G3D_TIER_HIGH);
+    int ssr = (c->tier >= G3D_TIER_HIGH) && g3d_dev_cfg_pub("water_ssr", 1);   /* cfg water_ssr=0: no screen-space reflections */
     int spectrum = g3d_water_spectrum_ready() ? 1 : 0;
 
     snprintf(out, n,
@@ -768,11 +769,16 @@ void g3d_water_render(G3DCamera *camera, int flip_y) {
     if (!g3d_waterfield_active()) return;
 
     if (!R.inited) {
+        if (g3d_dev_cfg_pub("nospectrum", 0)) R.want_spectrum = 0;
         /* Spectral waves where the hardware can run them. This must happen
            BEFORE the shaders are built, because whether the spectrum exists is
            compiled into them as WATER_SPECTRUM. */
         if (R.want_spectrum && g3d_glcaps()->compute && !g3d_water_spectrum_ready())
-            g3d_water_spectrum_init(256);
+#ifdef __PROSPERO__
+            g3d_water_spectrum_init(g3d_dev_cfg_pub("water_fft", 128));   /* 4x less FFT work than 256 */
+#else
+            g3d_water_spectrum_init(g3d_dev_cfg_pub("water_fft", 256));
+#endif
 
         if (!wr_build_shaders()) {
             fprintf(stderr, "G3D: water shader build failed; water disabled\n");
@@ -811,12 +817,22 @@ void g3d_water_render(G3DCamera *camera, int flip_y) {
        passes bind their own programs, so running them mid-setup would leave a
        compute shader active and send every uniform after this point to the wrong
        program -- which silently draws nothing at all. */
-    if (g3d_water_spectrum_ready())
+    /* The FFT cascades and the foam pass are the water's CPU/driver-heavy part (~6 ms on the PS5). Their
+       state is time-based, so running them every 2nd frame (default on PS5) only halves the update rate. */
+    static unsigned int wr_tick = 0;
+#ifdef __PROSPERO__
+    int wr_every = g3d_dev_cfg_pub("water_every", 2);
+#else
+    int wr_every = g3d_dev_cfg_pub("water_every", 1);
+#endif
+    int wr_run = (wr_every <= 1) || ((wr_tick++ % (unsigned)wr_every) == 0);
+
+    if (wr_run && g3d_water_spectrum_ready())
         g3d_water_spectrum_update(t);
 
     /* Same rule for the foam pass, and it must come before the surface reads
        the field it just wrote. */
-    wr_foam_update(t);
+    if (wr_run && !g3d_dev_cfg_pub("nofoam", 0)) wr_foam_update(t);
 
     G3DShaderProgram *sh = R.prog;
     g3d_shader_use(sh);

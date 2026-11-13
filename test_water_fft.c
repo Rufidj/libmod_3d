@@ -11,6 +11,7 @@
 #include <GL/glext.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
 #include "libmod_3d_glcaps.h"

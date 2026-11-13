@@ -24,6 +24,7 @@ extern "C" {
 #define G3D_SPRITE_SPHERICAL    1   /* mira siempre de frente a la camara (items, efectos) */
 
 int  g3d_sprite_create(int scene_id, float x, float y, float z);
+void g3d_sprite_set_origin(float x, float y, float z, float yaw);
 void g3d_sprite_destroy(int id);
 void g3d_sprites_clear(void);
 int  g3d_sprite_count(void);

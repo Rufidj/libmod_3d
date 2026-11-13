@@ -15,6 +15,10 @@ extern "C" {
 
 /* Create a unit cube (1x1x1) centered at origin */
 G3DMesh *g3d_primitive_create_cube(void);
+/* Columna: caja de 1x1 de base y `blocks` de alto (centrada en el origen), con las caras laterales repitiendo la textura una vez por bloque
+   (v de 0 a blocks): una pila de bloques en UNA sola malla (translucida no acumula capas, y gasta una entidad en vez de `blocks`). */
+G3DMesh *g3d_primitive_create_column(int blocks);
+G3DMesh *g3d_primitive_create_wedge(void);
 
 /* Create a unit sphere (radius 1) */
 G3DMesh *g3d_primitive_create_sphere(int segments);

@@ -18,7 +18,10 @@
 #include "libmod_3d_math.h"
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <math.h>
+
+#include <SDL.h>
 
 #ifndef VITA
 #define GL_GLEXT_PROTOTYPES
@@ -272,6 +275,7 @@ static void make_cubemap(GLuint *tex, int size, int mips) {
 }
 
 static int ibl_init(void) {
+    Uint32 ibl_t0 = SDL_GetTicks();
     if (g_ibl.initialized)
         return 1;
 
@@ -283,6 +287,7 @@ static int ibl_init(void) {
         return 0;
     }
 
+    printf("G3D: TIMING ibl.shaders=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     glGenVertexArrays(1, &g_ibl.cube_vao);
     glGenBuffers(1, &g_ibl.cube_vbo);
     glBindVertexArray(g_ibl.cube_vao);
@@ -300,10 +305,14 @@ static int ibl_init(void) {
     glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
     glBindVertexArray(0);
 
+    printf("G3D: TIMING ibl.buffers=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     make_cubemap(&g_ibl.env_cube, ENV_SIZE, 1);
+    printf("G3D: TIMING ibl.env_cube=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     make_cubemap(&g_ibl.irr_cube, IRR_SIZE, 0);
+    printf("G3D: TIMING ibl.irr_cube=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     make_cubemap(&g_ibl.pref_cube, PREF_SIZE, 1);
 
+    printf("G3D: TIMING ibl.pref_cube=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     glGenTextures(1, &g_ibl.brdf_lut);
     glBindTexture(GL_TEXTURE_2D, g_ibl.brdf_lut);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RG16F, BRDF_SIZE, BRDF_SIZE, 0, GL_RG, GL_FLOAT, NULL);
@@ -312,6 +321,7 @@ static int ibl_init(void) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
+    printf("G3D: TIMING ibl.brdf_tex=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     glGenFramebuffers(1, &g_ibl.fbo);
 
     /* The BRDF LUT depends on nothing but the BRDF: bake it once. */
@@ -333,6 +343,7 @@ static int ibl_init(void) {
     glViewport(prev_vp[0], prev_vp[1], prev_vp[2], prev_vp[3]);
 
     g_ibl.initialized = 1;
+    printf("G3D: TIMING ibl_init=%ums\n", (unsigned)(SDL_GetTicks() - ibl_t0));
     printf("G3D: IBL initialised (env %d², irradiance %d², prefilter %d² x%d mips, BRDF LUT %d²)\n",
            ENV_SIZE, IRR_SIZE, PREF_SIZE, PREF_MIPS, BRDF_SIZE);
     return 1;
@@ -355,26 +366,90 @@ static void draw_cube(void) {
     glBindVertexArray(0);
 }
 
+/* ---- Incremental bake -----------------------------------------------------------------------
+   One full bake is ~43 render passes (6 sky faces, mipmaps, 6 irradiance faces, PREF_MIPS x 6
+   prefilter faces): ~30 ms on the PS5, i.e. a visible hitch every time the day/night cycle makes the
+   environment dirty. The bake is therefore a list of small steps that g3d_ibl_update() runs a few
+   at a time (IBL_STEPS_PER_UPDATE), so the cost is spread over several frames. The very first bake (no
+   usable IBL yet) still runs all at once. Desktop keeps the old behaviour: all steps in one call. */
+#define IBL_STEPS (6 + 1 + 6 + PREF_MIPS * 6)
+#ifdef __PROSPERO__
+#  define IBL_STEPS_PER_UPDATE 6
+#  define IBL_INTERVAL_MS 400
+#else
+#  define IBL_STEPS_PER_UPDATE IBL_STEPS
+#  define IBL_INTERVAL_MS G3D_IBL_MIN_INTERVAL_MS
+#endif
+static int g_ibl_step = 0;            /* next step of a running bake; 0 = idle */
+static int g_ibl_running = 0;
+
+/* Returns 0 if the sky is not ready yet (the bake is abandoned and retried later). */
+static int ibl_run_step(int s, const Mat4 *views, Mat4 proj) {
+    if (s < 6) {                                         /* 1. sky -> environment cubemap */
+        glViewport(0, 0, ENV_SIZE, ENV_SIZE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + s, g_ibl.env_cube, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        return g3d_sky_render_env(views[s], proj) ? 1 : 0;
+    }
+    s -= 6;
+    glDisable(GL_DEPTH_TEST);
+    if (s == 0) {                                        /* env mips: the prefilter samples them */
+        glBindTexture(GL_TEXTURE_CUBE_MAP, g_ibl.env_cube);
+        glGenerateMipmap(GL_TEXTURE_CUBE_MAP);
+        return 1;
+    }
+    s -= 1;
+    if (s < 6) {                                         /* 2. diffuse irradiance */
+        g3d_shader_use(g_ibl.sh_irr);
+        g3d_shader_set_mat4(g_ibl.sh_irr, "uProjection", proj);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, g_ibl.env_cube);
+        g3d_shader_set_int(g_ibl.sh_irr, "uEnv", 0);
+        glViewport(0, 0, IRR_SIZE, IRR_SIZE);
+        g3d_shader_set_mat4(g_ibl.sh_irr, "uViewRot", views[s]);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + s, g_ibl.irr_cube, 0);
+        glClear(GL_COLOR_BUFFER_BIT);
+        draw_cube();
+        return 1;
+    }
+    s -= 6;                                              /* 3. specular prefilter, (mip, face) */
+    int mip = s / 6, f = s % 6;
+    int msize = PREF_SIZE >> mip;
+    if (msize < 1) msize = 1;
+    g3d_shader_use(g_ibl.sh_pref);
+    g3d_shader_set_mat4(g_ibl.sh_pref, "uProjection", proj);
+    g3d_shader_set_float(g_ibl.sh_pref, "uEnvSize", (float)ENV_SIZE);
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, g_ibl.env_cube);
+    g3d_shader_set_int(g_ibl.sh_pref, "uEnv", 0);
+    glViewport(0, 0, msize, msize);
+    g3d_shader_set_float(g_ibl.sh_pref, "uRoughness", (float)mip / (float)(PREF_MIPS - 1));
+    g3d_shader_set_mat4(g_ibl.sh_pref, "uViewRot", views[f]);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                           GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, g_ibl.pref_cube, mip);
+    glClear(GL_COLOR_BUFFER_BIT);
+    draw_cube();
+    return 1;
+}
+
 void g3d_ibl_update(void) {
     if (!g_ibl.enabled || !g_ibl.dirty)
         return;
     if (!ibl_init())
         return;
 
-    /* RITMO MAXIMO. Recapturar el entorno son seis caras de cubemap mas dos
-       convoluciones: del orden de 20 ms. Un ciclo dia/noche cambia el cielo en
-       CADA frame, y hacerlo entero cada vez hundia el juego de 2600 a 47 fps
-       (medido). La luz ambiental de un amanecer cambia despacio, asi que basta
-       con rehacerla unas veces por segundo: el ojo no distingue la diferencia y
-       el coste deja de existir.
-       Un cambio brusco -- entrar en una cueva, cambiar de escena -- se ve igual
-       de rapido porque el retraso maximo es una fraccion de segundo. */
-    {
+    /* RITMO MAXIMO (see the interval note below): not more than one bake per IBL_INTERVAL_MS. A bake
+       that is already running keeps going every frame until its steps are done. */
+    if (!g_ibl_running) {
         static unsigned int last_ms = 0;
         unsigned int now = SDL_GetTicks();
-        if (last_ms != 0 && (now - last_ms) < G3D_IBL_MIN_INTERVAL_MS)
-            return;              /* sigue sucio: se rehara en cuanto toque */
+        if (last_ms != 0 && g_ibl.ready && (now - last_ms) < IBL_INTERVAL_MS)
+            return;              /* still dirty: it will be redone as soon as it is due */
         last_ms = now;
+        g_ibl_running = 1;
+        g_ibl_step = 0;
     }
 
     GLint prev_fbo = 0, prev_vp[4];
@@ -389,73 +464,26 @@ void g3d_ibl_update(void) {
     glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE);
 
-    /* 1. Capture the sky into the environment cubemap. If the sky isn't up yet
-       (no scene has configured it), leave the capture dirty and retry next
-       frame rather than baking a black environment permanently. */
-    glViewport(0, 0, ENV_SIZE, ENV_SIZE);
+    int budget = g_ibl.ready ? IBL_STEPS_PER_UPDATE : IBL_STEPS;   /* first bake: all at once */
     int sky_ok = 1;
-    for (int f = 0; f < 6; f++) {
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, g_ibl.env_cube, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        if (!g3d_sky_render_env(views[f], proj))
-            sky_ok = 0;
-    }
-    if (!sky_ok) {
-        glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
-        glViewport(prev_vp[0], prev_vp[1], prev_vp[2], prev_vp[3]);
-        glEnable(GL_DEPTH_TEST);
-        return;   /* still dirty: retry once the sky exists */
-    }
-    glBindTexture(GL_TEXTURE_CUBE_MAP, g_ibl.env_cube);
-    glGenerateMipmap(GL_TEXTURE_CUBE_MAP);   /* prefilter samples these mips */
-
-    glDisable(GL_DEPTH_TEST);
-
-    /* 2. Diffuse irradiance. */
-    g3d_shader_use(g_ibl.sh_irr);
-    g3d_shader_set_mat4(g_ibl.sh_irr, "uProjection", proj);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, g_ibl.env_cube);
-    g3d_shader_set_int(g_ibl.sh_irr, "uEnv", 0);
-    glViewport(0, 0, IRR_SIZE, IRR_SIZE);
-    for (int f = 0; f < 6; f++) {
-        g3d_shader_set_mat4(g_ibl.sh_irr, "uViewRot", views[f]);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, g_ibl.irr_cube, 0);
-        glClear(GL_COLOR_BUFFER_BIT);
-        draw_cube();
-    }
-
-    /* 3. Specular prefilter: one mip per roughness step. */
-    g3d_shader_use(g_ibl.sh_pref);
-    g3d_shader_set_mat4(g_ibl.sh_pref, "uProjection", proj);
-    g3d_shader_set_float(g_ibl.sh_pref, "uEnvSize", (float)ENV_SIZE);
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, g_ibl.env_cube);
-    g3d_shader_set_int(g_ibl.sh_pref, "uEnv", 0);
-    for (int mip = 0; mip < PREF_MIPS; mip++) {
-        int msize = PREF_SIZE >> mip;
-        if (msize < 1) msize = 1;
-        glViewport(0, 0, msize, msize);
-        float rough = (float)mip / (float)(PREF_MIPS - 1);
-        g3d_shader_set_float(g_ibl.sh_pref, "uRoughness", rough);
-        for (int f = 0; f < 6; f++) {
-            g3d_shader_set_mat4(g_ibl.sh_pref, "uViewRot", views[f]);
-            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_CUBE_MAP_POSITIVE_X + f, g_ibl.pref_cube, mip);
-            glClear(GL_COLOR_BUFFER_BIT);
-            draw_cube();
-        }
+    while (budget-- > 0 && g_ibl_step < IBL_STEPS) {
+        if (!ibl_run_step(g_ibl_step, views, proj)) { sky_ok = 0; break; }
+        g_ibl_step++;
     }
 
     glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)prev_fbo);
     glViewport(prev_vp[0], prev_vp[1], prev_vp[2], prev_vp[3]);
     glEnable(GL_DEPTH_TEST);
 
-    g_ibl.dirty = 0;
-    g_ibl.ready = 1;
-
+    if (!sky_ok) {               /* the sky isn't up yet: stay dirty and retry later */
+        g_ibl_running = 0; g_ibl_step = 0;
+        return;
+    }
+    if (g_ibl_step >= IBL_STEPS) {
+        g_ibl_running = 0; g_ibl_step = 0;
+        g_ibl.dirty = 0;
+        g_ibl.ready = 1;
+    }
 }
 
 int g3d_ibl_bind(int unit_irradiance, int unit_prefilter, int unit_brdf) {

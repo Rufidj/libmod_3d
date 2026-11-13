@@ -11,6 +11,7 @@
 #include "libmod_3d_water.h"
 #include "libmod_3d_mesh.h"
 #include "libmod_3d_chunkterrain.h"   /* g3d_heightfield_height */
+#include "libmod_3d_scenefile.h"      /* g3d_scene_heightfield */
 #include <stdlib.h>
 #include <math.h>
 

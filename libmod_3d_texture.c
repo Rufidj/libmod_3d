@@ -249,6 +249,127 @@ int g3d_texture_upload_gpu(G3DTexture *texture) {
 #endif
 }
 
+/* ============================================================================
+   DEFERRED UPLOAD (glTF): the CPU work of a mip chain (box filter) runs on
+   worker threads; only the GL calls stay on the thread that owns the context.
+   The driver's glGenerateMipmap is single-threaded and slow on PS5, so this
+   path replaces it for batches of textures.
+   ============================================================================
+ */
+
+#ifndef VITA
+#define G3D_MIP_MAX_LEVELS 16
+#define G3D_MIP_THREADS 4
+
+typedef struct {
+    G3DTexture *tex;
+    uint32_t nlev;
+    uint32_t lw[G3D_MIP_MAX_LEVELS], lh[G3D_MIP_MAX_LEVELS];
+    uint8_t *lev[G3D_MIP_MAX_LEVELS];   /* lev[0] is tex->data (not owned) */
+} PendingTex;
+
+typedef struct { int start, step; } MipWorkArg;
+
+static PendingTex *g_pending = NULL;
+static int g_npending = 0, g_pending_cap = 0;
+
+/* Box-filter the full chain into owned buffers. Pure CPU, thread-safe. */
+static void build_mip_chain(PendingTex *p) {
+    G3DTexture *t = p->tex;
+    uint32_t w = t->width, h = t->height;
+    const uint8_t *src = t->data;
+
+    p->nlev = 1;
+    p->lw[0] = w; p->lh[0] = h; p->lev[0] = t->data;
+
+    while ((w > 1 || h > 1) && p->nlev < G3D_MIP_MAX_LEVELS) {
+        uint32_t nw = w > 1 ? w / 2 : 1, nh = h > 1 ? h / 2 : 1;
+        uint8_t *dst = (uint8_t *)malloc((size_t)nw * nh * 4);
+        if (!dst) break;
+        for (uint32_t y = 0; y < nh; y++) {
+            uint32_t sy0 = y * 2, sy1 = sy0 + 1 < h ? sy0 + 1 : h - 1;
+            for (uint32_t x = 0; x < nw; x++) {
+                uint32_t sx0 = x * 2, sx1 = sx0 + 1 < w ? sx0 + 1 : w - 1;
+                const uint8_t *a = src + ((size_t)sy0 * w + sx0) * 4;
+                const uint8_t *b = src + ((size_t)sy0 * w + sx1) * 4;
+                const uint8_t *c = src + ((size_t)sy1 * w + sx0) * 4;
+                const uint8_t *d = src + ((size_t)sy1 * w + sx1) * 4;
+                uint8_t *o = dst + ((size_t)y * nw + x) * 4;
+                for (int k = 0; k < 4; k++)
+                    o[k] = (uint8_t)((a[k] + b[k] + c[k] + d[k] + 2) / 4);
+            }
+        }
+        p->lev[p->nlev] = dst;
+        p->lw[p->nlev] = nw; p->lh[p->nlev] = nh;
+        p->nlev++;
+        src = dst; w = nw; h = nh;
+    }
+}
+
+static int mip_worker(void *arg) {
+    MipWorkArg *a = (MipWorkArg *)arg;
+    for (int i = a->start; i < g_npending; i += a->step)
+        build_mip_chain(&g_pending[i]);
+    return 0;
+}
+
+/* GL side of one texture: all levels from the prepared chain. Main thread only. */
+static void upload_prepared(PendingTex *p) {
+    G3DTexture *t = p->tex;
+    glGenTextures(1, &t->gl_handle);
+    glBindTexture(GL_TEXTURE_2D, t->gl_handle);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER,
+                    p->nlev > 1 ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    for (uint32_t l = 0; l < p->nlev; l++)
+        glTexImage2D(GL_TEXTURE_2D, (GLint)l, GL_RGBA, (GLsizei)p->lw[l], (GLsizei)p->lh[l],
+                     0, GL_RGBA, GL_UNSIGNED_BYTE, p->lev[l]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, (GLint)p->nlev - 1);
+    t->gpu_uploaded = 1;
+    for (uint32_t l = 1; l < p->nlev; l++) free(p->lev[l]);
+}
+#endif
+
+/* Queue a texture for the next g3d_texture_flush_pending(). Until then it has
+   CPU data only (gl_handle == 0), so it must not be bound before the flush. */
+void g3d_texture_defer_upload(G3DTexture *tex) {
+    if (!tex || !tex->data || tex->gpu_uploaded) return;
+#ifndef VITA
+    if (g_npending == g_pending_cap) {
+        int cap = g_pending_cap ? g_pending_cap * 2 : 256;
+        PendingTex *n = (PendingTex *)realloc(g_pending, (size_t)cap * sizeof *n);
+        if (!n) { g3d_texture_upload_gpu(tex); return; }
+        g_pending = n; g_pending_cap = cap;
+    }
+    memset(&g_pending[g_npending], 0, sizeof g_pending[0]);
+    g_pending[g_npending++].tex = tex;
+#else
+    g3d_texture_upload_gpu(tex);
+#endif
+}
+
+/* Build every queued mip chain on worker threads, then upload on this thread. */
+void g3d_texture_flush_pending(void) {
+#ifndef VITA
+    if (g_npending == 0) return;
+    int nthreads = g_npending < G3D_MIP_THREADS ? g_npending : G3D_MIP_THREADS;
+    SDL_Thread *th[G3D_MIP_THREADS] = {0};
+    MipWorkArg arg[G3D_MIP_THREADS];
+    for (int k = 0; k < nthreads; k++) {
+        arg[k].start = k; arg[k].step = nthreads;
+        th[k] = SDL_CreateThread(mip_worker, "g3d_mip", &arg[k]);
+        if (!th[k]) mip_worker(&arg[k]);   /* no thread: do it here */
+    }
+    for (int k = 0; k < nthreads; k++)
+        if (th[k]) SDL_WaitThread(th[k], NULL);
+    for (int i = 0; i < g_npending; i++)
+        upload_prepared(&g_pending[i]);
+#endif
+    g_npending = 0;
+}
+
 void g3d_texture_bind(G3DTexture *texture, int texture_unit) {
     if (!texture || !texture->gpu_uploaded)
         return;

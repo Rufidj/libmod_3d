@@ -64,6 +64,12 @@ G3DTexture *g3d_texture_create_from_data(const char *name, uint32_t width,
 /* Upload texture to GPU */
 int g3d_texture_upload_gpu(G3DTexture *texture);
 
+/* Batched upload: queue a texture now, upload it on g3d_texture_flush_pending().
+   The mip chains are built on worker threads. Until the flush the texture has
+   no GL handle. */
+void g3d_texture_defer_upload(G3DTexture *texture);
+void g3d_texture_flush_pending(void);
+
 /* Bind texture for rendering */
 void g3d_texture_bind(G3DTexture *texture, int texture_unit);
 
