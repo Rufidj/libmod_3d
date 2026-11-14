@@ -437,6 +437,7 @@ int64_t g3d_camera_safe_distance_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_collider_add_model_yaw_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_wall_ray_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_scatter_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_zone_clear_bgd(INSTANCE *my, int64_t *params);
@@ -639,6 +640,7 @@ DLSYSFUNCS __bgdexport( libmod_3d, functions_exports )[] = {
     /* el modelo entero de una vez: malla exacta (fija) o envolvente (se mueve) */
     FUNC("G3D_COLLIDER_ADD_MODEL", "IFFFF", TYPE_INT, g3d_collider_add_model_bgd),
     FUNC("G3D_COLLIDER_ADD_MODEL_YAW", "IFFFFF", TYPE_INT, g3d_collider_add_model_yaw_bgd),
+    FUNC("G3D_WALL_RAY", "FFFFFFF", TYPE_FLOAT, g3d_wall_ray_bgd),
     FUNC("G3D_RIGIDBODY_CREATE_CONVEX_MODEL", "FFFIFF", TYPE_INT, g3d_rigidbody_create_convex_model_bgd),
     FUNC("G3D_RIGIDBODY_DESTROY", "I", TYPE_INT, g3d_rigidbody_destroy_bgd),
     FUNC("G3D_RIGIDBODY_CLEAR", "", TYPE_INT, g3d_rigidbody_clear_bgd),

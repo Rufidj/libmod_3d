@@ -641,6 +641,16 @@ float g3d_jolt_ground_below(float x, float z, float y_top, float y_min) {
     return -1e30f;
 }
 
+/* Distance along a ray (unit dir) to the first level collider, or maxd if nothing is hit (used by the kart AI to see walls). */
+float g3d_jolt_ray_dist(float ox, float oy, float oz, float dx, float dy, float dz, float maxd) {
+    if (!g_inited || !g_ps || g_mesh_count <= 0) return maxd;
+    float l = sqrtf(dx*dx + dy*dy + dz*dz); if (l < 1e-6f) return maxd;
+    RRayCast ray{ RVec3(ox, oy, oz), Vec3(dx / l * maxd, dy / l * maxd, dz / l * maxd) };
+    RayCastResult hit;
+    if (g_ps->GetNarrowPhaseQuery().CastRay(ray, hit)) return hit.mFraction * maxd;
+    return maxd;
+}
+
 /* Push a vertical capsule (feet..feet+height, ignoring the low `step` part so
    small ledges are climbable, not walls) out of the level walls. Moves (*x,*z)
    in XZ and returns 1 if it had to. Floor/ceiling contacts (near-vertical

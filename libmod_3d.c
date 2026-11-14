@@ -2615,6 +2615,11 @@ int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params) { g3d_collider_cle
    apagado (hoy PS5, mientras se porta Jolt por separado) no hay a que
    llamar, asi que degradan a "no se pudo" en vez de dejar sin definir. */
 #ifdef USE_JOLT
+extern float g3d_jolt_ray_dist(float ox, float oy, float oz, float dx, float dy, float dz, float maxd);
+int64_t g3d_wall_ray_bgd(INSTANCE *my, int64_t *params) {
+    float v = g3d_jolt_ray_dist(*(float*)&params[0], *(float*)&params[1], *(float*)&params[2], *(float*)&params[3], *(float*)&params[4], *(float*)&params[5], *(float*)&params[6]);
+    return (int64_t) * (int32_t *)&v;
+}
 int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params) {
     return g3d_collider_add_model((void*)(intptr_t)params[0], *(float*)&params[1],
                                   *(float*)&params[2], *(float*)&params[3], *(float*)&params[4]);
@@ -2629,6 +2634,7 @@ int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params) {
                                              *(float*)&params[4], *(float*)&params[5]);
 }
 #else
+int64_t g3d_wall_ray_bgd(INSTANCE *my, int64_t *params) { (void)my; float v = *(float*)&params[6]; return (int64_t) * (int32_t *)&v; }
 int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
 int64_t g3d_collider_add_model_yaw_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
 int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
