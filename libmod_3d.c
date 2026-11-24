@@ -3083,6 +3083,7 @@ int64_t g3d_road_z_bgd(INSTANCE *my, int64_t *params)       { return G3D_RF(g3d_
 int64_t g3d_road_yaw_bgd(INSTANCE *my, int64_t *params)     { return G3D_RF(G3D_RAD2MD(g3d_road_yaw((int)params[0], *(float *)&params[1]))); }
 int64_t g3d_road_width_bgd(INSTANCE *my, int64_t *params)   { return G3D_RF(g3d_road_width((int)params[0], *(float *)&params[1])); }
 int64_t g3d_road_surface_bgd(INSTANCE *my, int64_t *params) { return g3d_road_surface((int)params[0], *(float *)&params[1]); }
+int64_t g3d_road_nearest_near_bgd(INSTANCE *my, int64_t *params) { return g3d_road_nearest_near((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3], *(float *)&params[4]); }
 int64_t g3d_road_nearest_bgd(INSTANCE *my, int64_t *params) { return g3d_road_nearest(*(float *)&params[0], *(float *)&params[1]); }
 int64_t g3d_road_near_dist_bgd(INSTANCE *my, int64_t *params)    { return G3D_RF(g3d_road_near_dist()); }
 int64_t g3d_road_near_offset_bgd(INSTANCE *my, int64_t *params)  { return G3D_RF(g3d_road_near_offset()); }

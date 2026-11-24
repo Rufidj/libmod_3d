@@ -444,6 +444,7 @@ int64_t g3d_road_yaw_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_road_width_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_road_surface_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_road_nearest_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_nearest_near_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_road_near_dist_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_road_near_offset_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_road_near_y_bgd(INSTANCE *my, int64_t *params);
@@ -653,6 +654,7 @@ DLSYSFUNCS __bgdexport( libmod_3d, functions_exports )[] = {
     FUNC("G3D_ROAD_WIDTH", "IF", TYPE_FLOAT, g3d_road_width_bgd),
     FUNC("G3D_ROAD_SURFACE", "IF", TYPE_INT, g3d_road_surface_bgd),
     FUNC("G3D_ROAD_NEAREST", "FF", TYPE_INT, g3d_road_nearest_bgd),
+    FUNC("G3D_ROAD_NEAREST_NEAR", "IFFFF", TYPE_INT, g3d_road_nearest_near_bgd),
     FUNC("G3D_ROAD_NEAR_DIST", "", TYPE_FLOAT, g3d_road_near_dist_bgd),
     FUNC("G3D_ROAD_NEAR_OFFSET", "", TYPE_FLOAT, g3d_road_near_offset_bgd),
     FUNC("G3D_ROAD_NEAR_Y", "", TYPE_FLOAT, g3d_road_near_y_bgd),

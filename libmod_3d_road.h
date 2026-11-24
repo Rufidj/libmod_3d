@@ -66,6 +66,7 @@ void  g3d_road_set_ground(int road, int on);    /* 1 = la carretera cuenta como 
 /* Busca la carretera mas cercana a (x, z) y deja el resultado para las g3d_road_near_*.
    Devuelve el id de la carretera, o -1 si no hay ninguna. */
 int   g3d_road_nearest(float x, float z);
+int   g3d_road_nearest_near(int road, float x, float z, float dist_prev, float y);   /* con continuidad: para puentes y cruces */
 float g3d_road_near_dist(void);                    /* distancia recorrida del punto proyectado */
 float g3d_road_near_offset(void);                  /* separacion lateral al centro (+ = izquierda) */
 float g3d_road_near_y(void);                       /* altura de la carretera ahi */
