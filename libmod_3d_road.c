@@ -293,15 +293,17 @@ int g3d_road_nearest(float x, float z) {
     return br;
 }
 /* Como g3d_road_nearest pero para carreteras que se CRUZAN o van una encima de otra (un puente, un bucle): el punto mas
-   cercano en planta puede ser de la otra rama. Entre todos los tramos a los que el punto esta pegado (dentro del ancho,
-   con 3 m de margen) se elige el que mas encaja con lo que ya se sabe: la distancia recorrida anterior (continuidad:
-   dist_prev >= 0, es la que devolvio la llamada anterior) y/o la altura (y > -1e8: la del coche; una rama baja no
-   se confunde con la de arriba). Si el punto no esta pegado a ningun tramo, se comporta como g3d_road_nearest. */
+   cercano en planta puede ser de la otra rama. Solo se consideran los tramos que encajan con lo que ya se sabe: los que
+   estan a menos de 40 m (a lo largo de la carretera) de la distancia anterior (dist_prev >= 0) y a menos de 3 m de
+   altura de y (y > -1e8). Entre ellos gana el mas cercano EN PLANTA, asi no hay retraso (el kart no se queda "colgado" de
+   un punto atras). Si ninguno encaja, se comporta como g3d_road_nearest sobre esa carretera. */
+#define NEAR_VENTANA 40.0f
+#define NEAR_ALTURA  3.0f
 int g3d_road_nearest_near(int r, float x, float z, float dist_prev, float y) {
     if (!built(r)) return g3d_road_nearest(x, z);
     const Road *R = &g_road[r];
     int nseg = R->closed ? R->ns : R->ns - 1;
-    int bi = -1; float bt = 0.0f, bcost = 1e30f, dmin = 1e30f; int mi = -1; float mt = 0.0f;
+    int bi = -1; float bt = 0.0f, bd2 = 1e30f, md2 = 1e30f; int mi = -1; float mt = 0.0f;
     int use_d = dist_prev >= 0.0f, use_y = y > -1e8f;
     for (int i = 0; i < nseg; i++) {
         const Sample *a = &R->s[i], *b = &R->s[(i + 1) % R->ns];
@@ -309,18 +311,16 @@ int g3d_road_nearest_near(int r, float x, float z, float dist_prev, float y) {
         float t = l2 > 1e-9f ? ((x - a->c[0]) * ex + (z - a->c[2]) * ez) / l2 : 0.0f;
         if (t < 0) t = 0; if (t > 1) t = 1;
         float px = a->c[0] + ex * t - x, pz = a->c[2] + ez * t - z, d2 = px*px + pz*pz;
-        if (d2 < dmin) { dmin = d2; mi = i; mt = t; }
-        float hw = (a->w + (b->w - a->w) * t) * 0.5f + 3.0f;
-        if (d2 > hw * hw) continue;                                   /* no esta pegado a este tramo */
-        float cost = sqrtf(d2) * 0.1f;                               /* a igualdad, el mas cercano */
+        if (d2 < md2) { md2 = d2; mi = i; mt = t; }
+        if (d2 >= bd2) continue;
         if (use_d) {
             Pt q; interp(R, i, t, &q);
             float dd = fabsf(q.dist - dist_prev);
             if (R->closed && R->length > 0.0f && dd > R->length * 0.5f) dd = R->length - dd;
-            cost += dd;
+            if (dd > NEAR_VENTANA) continue;
         }
-        if (use_y) cost += fabsf(a->c[1] + (b->c[1] - a->c[1]) * t - y) * 6.0f;
-        if (cost < bcost) { bcost = cost; bi = i; bt = t; }
+        if (use_y && fabsf(a->c[1] + (b->c[1] - a->c[1]) * t - y) > NEAR_ALTURA) continue;
+        bd2 = d2; bi = i; bt = t;
     }
     if (bi < 0) { bi = mi; bt = mt; }
     if (bi < 0) { g_near.road = -1; return -1; }
