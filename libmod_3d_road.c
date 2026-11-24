@@ -33,11 +33,25 @@ typedef struct {
     float length;
     float bb[4];                       /* caja (minx, maxx, minz, maxz) para descartar rapido en g3d_road_ground */
     int   ground;                      /* 1 = la carretera cuenta como suelo (por defecto NO: es solo informacion) */
+    unsigned int body;                 /* cuerpo estatico de Jolt de la superficie (0xFFFFFFFF = ninguno) */
     int   ent[G3D_ROAD_SURF];          /* entidad dibujada de cada superficie (-1 = ninguna) */
     int   mat[G3D_ROAD_SURF];
 } Road;
 
 static Road g_road[G3D_ROAD_MAX];
+
+#ifdef USE_JOLT
+extern unsigned int g3d_jolt_static_mesh_add(const float *xyz, int nverts, const unsigned int *idx, int nidx);
+extern void g3d_jolt_static_mesh_remove(unsigned int handle);
+#endif
+static void bordes(const Sample *s, float L[3], float Rr[3], float N[3]);
+static void ground_sync(int r);
+static void jolt_ground_remove(Road *R) {
+#ifdef USE_JOLT
+    if (R->body != 0xFFFFFFFFu) g3d_jolt_static_mesh_remove(R->body);
+#endif
+    R->body = 0xFFFFFFFFu;
+}
 
 static int ok(int r) { return r >= 0 && r < G3D_ROAD_MAX && g_road[r].active; }
 static int built(int r) { return ok(r) && g_road[r].built && g_road[r].ns >= 2; }
@@ -47,13 +61,13 @@ int g3d_road_create(int closed) {
         if (g_road[i].active) continue;
         free(g_road[i].s);
         memset(&g_road[i], 0, sizeof(Road));
-        g_road[i].active = 1; g_road[i].closed = closed ? 1 : 0;
+        g_road[i].active = 1; g_road[i].closed = closed ? 1 : 0; g_road[i].body = 0xFFFFFFFFu;
         for (int k = 0; k < G3D_ROAD_SURF; k++) { g_road[i].ent[k] = -1; g_road[i].mat[k] = -1; }
         return i;
     }
     return -1;
 }
-void g3d_road_destroy(int r) { if (!ok(r)) return; g3d_road_hide(r); free(g_road[r].s); memset(&g_road[r], 0, sizeof(Road)); }
+void g3d_road_destroy(int r) { if (!ok(r)) return; g3d_road_hide(r); jolt_ground_remove(&g_road[r]); free(g_road[r].s); memset(&g_road[r], 0, sizeof(Road)); }
 void g3d_road_clear(void)    { for (int i = 0; i < G3D_ROAD_MAX; i++) g3d_road_destroy(i); }
 
 int g3d_road_add_node(int r, float x, float z, float y, float width, float bank_deg,
@@ -197,6 +211,7 @@ int g3d_road_build(int r) {
         if (S[i].c[2] > R->bb[3]) R->bb[3] = S[i].c[2];
     }
     R->bb[0] -= mw; R->bb[1] += mw; R->bb[2] -= mw; R->bb[3] += mw;
+    ground_sync(r);   /* si cuenta como suelo, su cuerpo de Jolt sigue a la nueva curva */
     return N;
 }
 
@@ -312,7 +327,11 @@ int g3d_road_entity(int r, int surface) {
     if (!ok(r) || surface < 0 || surface >= G3D_ROAD_SURF) return -1;
     return g_road[r].ent[surface];
 }
-void g3d_road_set_ground(int r, int on) { if (ok(r)) g_road[r].ground = on ? 1 : 0; }
+void g3d_road_set_ground(int r, int on) {
+    if (!ok(r)) return;
+    g_road[r].ground = on ? 1 : 0;
+    ground_sync(r);
+}
 
 void g3d_road_hide(int r) {
     if (!ok(r)) return;
@@ -329,6 +348,36 @@ static void bordes(const Sample *s, float L[3], float Rr[3], float N[3]) {
     Rr[0] = s->c[0] - s->l[0] * cb * hw; Rr[1] = s->c[1] + sb * hw; Rr[2] = s->c[2] - s->l[1] * cb * hw;
     float tb = tanf(b); N[0] = tb * s->l[0]; N[1] = 1.0f; N[2] = tb * s->l[1];
     float l = sqrtf(N[0]*N[0] + 1.0f + N[2]*N[2]); N[0] /= l; N[1] /= l; N[2] /= l;
+}
+
+/* Si la carretera cuenta como suelo, los cuerpos rigidos de Jolt tambien tienen que pisarla: se
+   monta una malla estatica con su superficie (la misma que se dibuja: ancho y peralte). El
+   personaje y el vehiculo del motor ya la notan por g3d_road_ground. Sin Jolt no hace nada. */
+static void ground_sync(int r) {
+    Road *R = &g_road[r];
+    jolt_ground_remove(R);
+#ifdef USE_JOLT
+    if (!R->ground || !built(r)) return;
+    int nseg = R->closed ? R->ns : R->ns - 1;
+    if (nseg < 1) return;
+    float *V = (float *)malloc(sizeof(float) * 3 * (size_t)R->ns * 2);
+    unsigned int *I = (unsigned int *)malloc(sizeof(unsigned int) * 6 * (size_t)nseg);
+    if (!V || !I) { free(V); free(I); return; }
+    for (int i = 0; i < R->ns; i++) {
+        float Lp[3], Rp[3], Np[3];
+        bordes(&R->s[i], Lp, Rp, Np);
+        memcpy(&V[(i * 2 + 0) * 3], Rp, sizeof(float) * 3);   /* 2i = derecha, 2i+1 = izquierda */
+        memcpy(&V[(i * 2 + 1) * 3], Lp, sizeof(float) * 3);
+    }
+    int ni = 0;
+    for (int i = 0; i < nseg; i++) {
+        unsigned int a = (unsigned int)(i * 2), b = (unsigned int)(((i + 1) % R->ns) * 2);
+        I[ni++] = a;     I[ni++] = b;     I[ni++] = a + 1;
+        I[ni++] = a + 1; I[ni++] = b;     I[ni++] = b + 1;
+    }
+    R->body = g3d_jolt_static_mesh_add(V, R->ns * 2, I, ni);
+    free(V); free(I);
+#endif
 }
 
 int g3d_road_show(int r, int scene) {

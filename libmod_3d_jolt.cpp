@@ -381,6 +381,35 @@ int g3d_collider_add_mesh(void *model, int submesh, float x, float y, float z, f
     return s;
 }
 
+/* Malla estatica a partir de triangulos sueltos (xyz consecutivos + indices). Devuelve un
+   identificador PROPIO (no ocupa hueco de g3d_rigidbody_*, asi g3d_rigidbody_clear no lo quita
+   y nadie reutiliza su hueco) o 0xFFFFFFFF si falla. Lo usa la carretera cuando cuenta como suelo. */
+unsigned int g3d_jolt_static_mesh_add(const float *xyz, int nverts, const unsigned int *idx, int nidx) {
+    jolt_init();
+    if (!xyz || !idx || nverts < 3 || nidx < 3) return 0xFFFFFFFFu;
+    VertexList verts; verts.reserve(nverts);
+    for (int i = 0; i < nverts; i++) verts.push_back(Float3(xyz[i*3+0], xyz[i*3+1], xyz[i*3+2]));
+    IndexedTriangleList tris; tris.reserve(nidx / 3);
+    for (int i = 0; i + 2 < nidx; i += 3) tris.push_back(IndexedTriangle(idx[i], idx[i+1], idx[i+2], 0));
+    MeshShapeSettings ms(verts, tris);
+    ShapeSettings::ShapeResult r = ms.Create();
+    if (r.HasError()) return 0xFFFFFFFFu;
+    BodyCreationSettings bcs(r.Get(), RVec3(0, 0, 0), Quat::sIdentity(), EMotionType::Static, Layers::NON_MOVING);
+    bcs.mFriction = 0.8f;
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    BodyID bid = bi.CreateAndAddBody(bcs, EActivation::DontActivate);
+    if (bid.IsInvalid()) return 0xFFFFFFFFu;
+    g_ps->OptimizeBroadPhase();
+    return bid.GetIndexAndSequenceNumber();
+}
+void g3d_jolt_static_mesh_remove(unsigned int handle) {
+    if (handle == 0xFFFFFFFFu || !g_ps) return;
+    BodyID bid(handle);
+    BodyInterface &bi = g_ps->GetBodyInterface();
+    if (!bi.IsAdded(bid)) return;
+    bi.RemoveBody(bid); bi.DestroyBody(bid);
+}
+
 void g3d_rigidbody_destroy(int id) {
     if (!jrb_ok(id)) return;
     BodyInterface &bi = g_ps->GetBodyInterface();
