@@ -14,6 +14,8 @@
  *   MODEL <model> <x> <y> <z> <yaw> <scale>
  *   PREFAB_FILE <path>
  *   PREFAB_AT <x> <y> <z> <yaw>
+ *   ROAD <cerrada 0|1>                                    (abre una carretera)
+ *   ROADNODE <x> <z> <y> <ancho> <peralte> <sigue> <dy> <superficie> [<tx> <tz>]   (un nodo de la ultima ROAD)
  */
 
 #include "libmod_3d_scenefile.h"
@@ -37,6 +39,7 @@
 #include "libmod_3d_instance.h"
 #include "libmod_3d_prefab.h"
 #include "libmod_3d_math.h"
+#include "libmod_3d_road.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -75,8 +78,8 @@ static float  g_scene_ws = 0.0f;
 static float  g_scene_water = -1e30f;
 static int    g_scene_has_water = 0;
 
-/* Bilinear ground height at world (x,z) on the last-loaded scene's heightmap. */
-float g3d_scene_terrain_height(float x, float z) {
+/* Altura del RELIEVE solo (sin carreteras). La usa la propia carretera para pegarse al terreno. */
+float g3d_scene_terrain_height_raw(float x, float z) {
     /* on voxel terrain, use the live voxel surface (so characters walk the sculpted
        relief); fall back to the heightmap otherwise */
     if (g3d_voxterrain_active()) {
@@ -85,6 +88,14 @@ float g3d_scene_terrain_height(float x, float z) {
     }
     if (!g_scene_H || g_scene_side <= 0) return 0.0f;
     return g3d_heightfield_height(g_scene_H, g_scene_side, g_scene_ws, x, z);
+}
+
+/* Suelo en (x,z): la carretera si el punto cae dentro de su ancho, si no el relieve. Es lo que usan el vehiculo, el
+   personaje y las colisiones, asi que las carreteras son suelo sin hacer nada mas. */
+float g3d_scene_terrain_height(float x, float z) {
+    float h;
+    if (g3d_road_ground(x, z, &h)) return h;
+    return g3d_scene_terrain_height_raw(x, z);
 }
 
 int g3d_scene_heightfield(const float **H, int *side, float *world_size) {
@@ -183,6 +194,8 @@ int g3d_scene_load(const char *file) {
     G3DMesh *terrain = NULL;
     int cur_prefab = -1;
     g3d_fluid_clear();
+    g3d_road_clear();
+    int cur_road = -1;
     g3d_flow_clear();
     g3d_water_clear_ripple_sources();
     g3d_watersim_shutdown();   /* a WATERSIM line re-inits the live water sim */
@@ -244,6 +257,17 @@ int g3d_scene_load(const char *file) {
         } else if (strncmp(line, "SPAWN", 5) == 0) {
             if (sscanf(line, "SPAWN %f %f %f", &g_scene_spawn[0], &g_scene_spawn[1], &g_scene_spawn[2]) == 3)
                 g_scene_has_spawn = 1;
+        } else if (strncmp(line, "ROADNODE", 8) == 0) {
+            /* ROADNODE x z y ancho peralte sigue dy superficie */
+            float rx, rz, ry, rw, rb, rdy, rtx = 0, rtz = 0; int rf, rs;
+            int rn = cur_road >= 0 ? sscanf(line, "ROADNODE %f %f %f %f %f %d %f %d %f %f", &rx, &rz, &ry, &rw, &rb, &rf, &rdy, &rs, &rtx, &rtz) : 0;
+            if (rn >= 8) {
+                int ni = g3d_road_add_node(cur_road, rx, rz, ry, rw, rb, rf, rdy, rs);
+                if (rn >= 10 && ni >= 0) g3d_road_set_tangent(cur_road, ni, rtx, rtz);
+            }
+        } else if (strncmp(line, "ROAD", 4) == 0) {
+            int rc = 1; sscanf(line, "ROAD %d", &rc);          /* ROAD <cerrada 0|1> abre una carretera nueva */
+            cur_road = g3d_road_create(rc);
         } else if (strncmp(line, "VOXTERRAIN", 10) == 0) {
             sscanf(line, "VOXTERRAIN %511s %255s", vox_path, vox_wall);   /* loaded at the end */
         } else if (strncmp(line, "TERRAIN", 7) == 0) {
@@ -526,6 +550,8 @@ int g3d_scene_load(const char *file) {
 
     /* retain the heightfield so the game can sample ground height to walk on it */
     if (hm_H) { g_scene_H = hm_H; g_scene_side = hm_side; g_scene_ws = hm_ws; }
+    for (int r = 0; r < G3D_ROAD_MAX; r++)       /* con el terreno ya cargado: solo se calcula (no se dibuja ni es suelo) */
+        if (g3d_road_nodes(r) > 0) g3d_road_build(r);
     free(river_mask);
     fclose(f);
     fprintf(stderr, "G3D: scene loaded: %s\n", file);

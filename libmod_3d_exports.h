@@ -427,6 +427,35 @@ int64_t g3d_char_set_water_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_update_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_set_position_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_set_tuning_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_create_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_destroy_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_clear_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_add_node_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_set_tangent_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_build_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_count_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_nodes_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_closed_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_length_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_x_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_z_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_yaw_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_width_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_surface_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_nearest_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_dist_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_offset_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_y_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_width_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_surface_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_on_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_near_yaw_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_show_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_set_ground_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_hide_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_entity_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_road_set_color_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_x_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_y_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_char_z_bgd(INSTANCE *my, int64_t *params);
@@ -607,6 +636,35 @@ DLSYSFUNCS __bgdexport( libmod_3d, functions_exports )[] = {
     FUNC("G3D_CHAR_Y", "I", TYPE_FLOAT, g3d_char_y_bgd),
     FUNC("G3D_CHAR_Z", "I", TYPE_FLOAT, g3d_char_z_bgd),
     FUNC("G3D_CHAR_GROUNDED", "I", TYPE_INT, g3d_char_grounded_bgd),
+    FUNC("G3D_ROAD_CREATE", "I", TYPE_INT, g3d_road_create_bgd),
+    FUNC("G3D_ROAD_DESTROY", "I", TYPE_INT, g3d_road_destroy_bgd),
+    FUNC("G3D_ROAD_CLEAR", "", TYPE_INT, g3d_road_clear_bgd),
+    FUNC("G3D_ROAD_ADD_NODE", "IFFFFFIFI", TYPE_INT, g3d_road_add_node_bgd),
+    FUNC("G3D_ROAD_SET_TANGENT", "IIFF", TYPE_INT, g3d_road_set_tangent_bgd),
+    FUNC("G3D_ROAD_BUILD", "I", TYPE_INT, g3d_road_build_bgd),
+    FUNC("G3D_ROAD_COUNT", "", TYPE_INT, g3d_road_count_bgd),
+    FUNC("G3D_ROAD_NODES", "I", TYPE_INT, g3d_road_nodes_bgd),
+    FUNC("G3D_ROAD_CLOSED", "I", TYPE_INT, g3d_road_closed_bgd),
+    FUNC("G3D_ROAD_LENGTH", "I", TYPE_FLOAT, g3d_road_length_bgd),
+    FUNC("G3D_ROAD_X", "IF", TYPE_FLOAT, g3d_road_x_bgd),
+    FUNC("G3D_ROAD_Y", "IF", TYPE_FLOAT, g3d_road_y_bgd),
+    FUNC("G3D_ROAD_Z", "IF", TYPE_FLOAT, g3d_road_z_bgd),
+    FUNC("G3D_ROAD_YAW", "IF", TYPE_FLOAT, g3d_road_yaw_bgd),
+    FUNC("G3D_ROAD_WIDTH", "IF", TYPE_FLOAT, g3d_road_width_bgd),
+    FUNC("G3D_ROAD_SURFACE", "IF", TYPE_INT, g3d_road_surface_bgd),
+    FUNC("G3D_ROAD_NEAREST", "FF", TYPE_INT, g3d_road_nearest_bgd),
+    FUNC("G3D_ROAD_NEAR_DIST", "", TYPE_FLOAT, g3d_road_near_dist_bgd),
+    FUNC("G3D_ROAD_NEAR_OFFSET", "", TYPE_FLOAT, g3d_road_near_offset_bgd),
+    FUNC("G3D_ROAD_NEAR_Y", "", TYPE_FLOAT, g3d_road_near_y_bgd),
+    FUNC("G3D_ROAD_NEAR_WIDTH", "", TYPE_FLOAT, g3d_road_near_width_bgd),
+    FUNC("G3D_ROAD_NEAR_SURFACE", "", TYPE_INT, g3d_road_near_surface_bgd),
+    FUNC("G3D_ROAD_NEAR_ON", "", TYPE_INT, g3d_road_near_on_bgd),
+    FUNC("G3D_ROAD_NEAR_YAW", "", TYPE_FLOAT, g3d_road_near_yaw_bgd),
+    FUNC("G3D_ROAD_SHOW", "II", TYPE_INT, g3d_road_show_bgd),
+    FUNC("G3D_ROAD_SET_GROUND", "II", TYPE_INT, g3d_road_set_ground_bgd),
+    FUNC("G3D_ROAD_HIDE", "I", TYPE_INT, g3d_road_hide_bgd),
+    FUNC("G3D_ROAD_ENTITY", "II", TYPE_INT, g3d_road_entity_bgd),
+    FUNC("G3D_ROAD_SET_COLOR", "IFFF", TYPE_INT, g3d_road_set_color_bgd),
     FUNC("G3D_PHYSICS_SET_GRAVITY", "F", TYPE_INT, g3d_physics_set_gravity_bgd),
     FUNC("G3D_COLLIDER_ADD_BOX", "FFFFFF", TYPE_INT, g3d_collider_add_box_bgd),
     FUNC("G3D_CAMERA_SAFE_DISTANCE", "FFFFFFFF", TYPE_FLOAT, g3d_camera_safe_distance_bgd),

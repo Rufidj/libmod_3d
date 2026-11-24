@@ -41,6 +41,7 @@
 #include "libmod_3d_worldgen.h"
 #include "libmod_3d_prefab.h"
 #include "libmod_3d_scenefile.h"
+#include "libmod_3d_road.h"
 #include "libmod_3d_voxterrain.h"
 #include "libmod_3d_pick.h"
 #include "libmod_3d_paint.h"
@@ -3059,5 +3060,41 @@ void __bgdexport( libmod_3d, module_finalize )() {
     }
     g3d_engine_shutdown();
 }
+
+
+/* ---- Carreteras (libmod_3d_road.c): solo por donde se puede circular ---- */
+#define G3D_RF(x) ({ float _v = (x); (int64_t) * (int32_t *)&_v; })
+int64_t g3d_road_create_bgd(INSTANCE *my, int64_t *params)  { return g3d_road_create((int)params[0]); }
+int64_t g3d_road_destroy_bgd(INSTANCE *my, int64_t *params) { g3d_road_destroy((int)params[0]); return 1; }
+int64_t g3d_road_clear_bgd(INSTANCE *my, int64_t *params)   { g3d_road_clear(); return 1; }
+int64_t g3d_road_add_node_bgd(INSTANCE *my, int64_t *params) {
+    return g3d_road_add_node((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3],
+                             *(float *)&params[4], *(float *)&params[5], (int)params[6], *(float *)&params[7], (int)params[8]);
+}
+int64_t g3d_road_set_tangent_bgd(INSTANCE *my, int64_t *params) { g3d_road_set_tangent((int)params[0], (int)params[1], *(float *)&params[2], *(float *)&params[3]); return 1; }
+int64_t g3d_road_build_bgd(INSTANCE *my, int64_t *params)   { return g3d_road_build((int)params[0]); }
+int64_t g3d_road_count_bgd(INSTANCE *my, int64_t *params)   { return g3d_road_count(); }
+int64_t g3d_road_nodes_bgd(INSTANCE *my, int64_t *params)   { return g3d_road_nodes((int)params[0]); }
+int64_t g3d_road_closed_bgd(INSTANCE *my, int64_t *params)  { return g3d_road_closed((int)params[0]); }
+int64_t g3d_road_length_bgd(INSTANCE *my, int64_t *params)  { return G3D_RF(g3d_road_length((int)params[0])); }
+int64_t g3d_road_x_bgd(INSTANCE *my, int64_t *params)       { return G3D_RF(g3d_road_x((int)params[0], *(float *)&params[1])); }
+int64_t g3d_road_y_bgd(INSTANCE *my, int64_t *params)       { return G3D_RF(g3d_road_y((int)params[0], *(float *)&params[1])); }
+int64_t g3d_road_z_bgd(INSTANCE *my, int64_t *params)       { return G3D_RF(g3d_road_z((int)params[0], *(float *)&params[1])); }
+int64_t g3d_road_yaw_bgd(INSTANCE *my, int64_t *params)     { return G3D_RF(G3D_RAD2MD(g3d_road_yaw((int)params[0], *(float *)&params[1]))); }
+int64_t g3d_road_width_bgd(INSTANCE *my, int64_t *params)   { return G3D_RF(g3d_road_width((int)params[0], *(float *)&params[1])); }
+int64_t g3d_road_surface_bgd(INSTANCE *my, int64_t *params) { return g3d_road_surface((int)params[0], *(float *)&params[1]); }
+int64_t g3d_road_nearest_bgd(INSTANCE *my, int64_t *params) { return g3d_road_nearest(*(float *)&params[0], *(float *)&params[1]); }
+int64_t g3d_road_near_dist_bgd(INSTANCE *my, int64_t *params)    { return G3D_RF(g3d_road_near_dist()); }
+int64_t g3d_road_near_offset_bgd(INSTANCE *my, int64_t *params)  { return G3D_RF(g3d_road_near_offset()); }
+int64_t g3d_road_near_y_bgd(INSTANCE *my, int64_t *params)       { return G3D_RF(g3d_road_near_y()); }
+int64_t g3d_road_near_width_bgd(INSTANCE *my, int64_t *params)   { return G3D_RF(g3d_road_near_width()); }
+int64_t g3d_road_near_surface_bgd(INSTANCE *my, int64_t *params) { return g3d_road_near_surface(); }
+int64_t g3d_road_near_on_bgd(INSTANCE *my, int64_t *params)      { return g3d_road_near_on(); }
+int64_t g3d_road_near_yaw_bgd(INSTANCE *my, int64_t *params)     { return G3D_RF(G3D_RAD2MD(g3d_road_near_yaw())); }
+int64_t g3d_road_show_bgd(INSTANCE *my, int64_t *params)       { return g3d_road_show((int)params[0], (int)params[1]); }
+int64_t g3d_road_set_ground_bgd(INSTANCE *my, int64_t *params) { g3d_road_set_ground((int)params[0], (int)params[1]); return 1; }
+int64_t g3d_road_hide_bgd(INSTANCE *my, int64_t *params)       { g3d_road_hide((int)params[0]); return 1; }
+int64_t g3d_road_entity_bgd(INSTANCE *my, int64_t *params)     { return g3d_road_entity((int)params[0], (int)params[1]); }
+int64_t g3d_road_set_color_bgd(INSTANCE *my, int64_t *params)  { g3d_road_set_color((int)params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3]); return 1; }
 
 #include "libmod_3d_exports.h"

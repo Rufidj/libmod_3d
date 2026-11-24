@@ -130,6 +130,7 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_anim.c
     libmod_3d_collide.c
     libmod_3d_physics.c
+    libmod_3d_road.c
     libmod_3d_mirror.c
     libmod_3d_instance.c
     libmod_3d_stream.c

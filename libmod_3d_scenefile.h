@@ -26,7 +26,8 @@ int g3d_scene_load(const char *file);
    - terrain_height: bilinear ground height at world (x,z).
    - water_level: surface Y of the first lake / global water (very negative if
      the scene has no water). */
-float g3d_scene_terrain_height(float x, float z);
+float g3d_scene_terrain_height(float x, float z);       /* suelo: carretera si la hay, si no relieve */
+float g3d_scene_terrain_height_raw(float x, float z);   /* solo el relieve */
 float g3d_scene_water_level(void);
 
 /* Raw heightmap of the loaded scene (for a physics engine to build a collision
