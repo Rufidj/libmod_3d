@@ -59,6 +59,10 @@ void g3d_model_animate_blend(G3DModel *model, int a0, float t0,
 
 /* Restore the bind pose (skin all meshes with identity joints). */
 void g3d_model_rest_pose(G3DModel *model);
+/* Capas: varias animaciones a la vez (begin -> add... -> apply). Ver libmod_3d_anim.c. */
+void g3d_model_pose_begin(G3DModel *model);
+void g3d_model_pose_add(G3DModel *model, int anim, float time, int loop);
+void g3d_model_pose_apply(G3DModel *model);
 
 /* Root-motion lock: 1 (default) keeps the character in place, 0 lets the root
    bone translate (e.g. a walk cycle that moves forward). */

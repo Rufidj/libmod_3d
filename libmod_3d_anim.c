@@ -354,6 +354,52 @@ void g3d_model_animate_all(G3DModel *model, float time, int loop) {
     }
 }
 
+/* ---- Capas de animacion: varias animaciones A LA VEZ, cada una con su propio tiempo ----
+   g3d_model_animate solo reproduce una y devuelve el resto de nodos a su pose base, asi que no se puede tener un portal girando
+   (bucle) y una puerta abriendose (una vez) en el mismo modelo. Con capas:
+       g3d_model_pose_begin(m);                 // todos los nodos a su pose base
+       g3d_model_pose_add(m, portales, t1, 1);  // cada llamada escribe SOLO los nodos de esa animacion
+       g3d_model_pose_add(m, puerta, t2, 0);
+       g3d_model_pose_apply(m);                 // calcula las transformaciones finales (y el esqueleto si lo hay)
+   Si dos animaciones tocan el mismo nodo gana la ultima que se anade. */
+void g3d_model_pose_begin(G3DModel *model) {
+    if (!model_animable(model))
+        return;
+    for (int n = 0; n < model->node_count; n++) {
+        model->node_cur_t[n] = model->node_base_t[n];
+        model->node_cur_r[n] = model->node_base_r[n];
+        model->node_cur_s[n] = model->node_base_s[n];
+    }
+}
+
+void g3d_model_pose_add(G3DModel *model, int anim, float time, int loop) {
+    if (!model_animable(model) || anim < 0 || anim >= model->animation_count)
+        return;
+    G3DAnimation *A = &model->animations[anim];
+    float t = time;
+    if (A->duration > 1e-6f) {
+        if (loop)                 t = fmodf(time, A->duration);
+        else if (t > A->duration) t = A->duration;
+    }
+    if (t < 0.0f) t = 0.0f;
+    for (int c = 0; c < A->channel_count; c++) {
+        G3DAnimChannel *ch = &A->channels[c];
+        if (ch->node < 0 || ch->node >= model->node_count)
+            continue;
+        float val[4];
+        sample_channel(ch, t, val);
+        if (ch->path == 0)      model->node_cur_t[ch->node] = vec3_make(val[0], val[1], val[2]);
+        else if (ch->path == 1) model->node_cur_r[ch->node] = quat_make(val[0], val[1], val[2], val[3]);
+        else if (ch->path == 2) model->node_cur_s[ch->node] = vec3_make(val[0], val[1], val[2]);
+    }
+}
+
+void g3d_model_pose_apply(G3DModel *model) {
+    if (!model_animable(model))
+        return;
+    apply_pose(model);
+}
+
 /* Cross-fade two animations: weight 0 = a0 only, 1 = a1 only. Blends per node
    (lerp translation/scale, slerp rotation). Great for idle<->walk<->run. */
 void g3d_model_animate_blend(G3DModel *model, int a0, float t0,

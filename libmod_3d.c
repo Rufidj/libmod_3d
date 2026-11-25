@@ -862,6 +862,21 @@ int64_t g3d_model_animate_all_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 
+int64_t g3d_model_pose_begin_bgd(INSTANCE *my, int64_t *params) {
+    g3d_model_pose_begin((G3DModel *)(intptr_t)params[0]);
+    return 1;
+}
+
+int64_t g3d_model_pose_add_bgd(INSTANCE *my, int64_t *params) {
+    g3d_model_pose_add((G3DModel *)(intptr_t)params[0], (int)params[1], *(float *)&params[2], (int)params[3]);
+    return 1;
+}
+
+int64_t g3d_model_pose_apply_bgd(INSTANCE *my, int64_t *params) {
+    g3d_model_pose_apply((G3DModel *)(intptr_t)params[0]);
+    return 1;
+}
+
 int64_t g3d_model_rest_pose_bgd(INSTANCE *my, int64_t *params) {
     G3DModel *model = (G3DModel *)(intptr_t)params[0];
     g3d_model_rest_pose(model);
