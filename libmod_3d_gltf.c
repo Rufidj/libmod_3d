@@ -121,6 +121,16 @@ static G3DTexture *load_dds_from_memory(const uint8_t *d, size_t size) {
 #endif
 }
 
+/* baseColorFactor del material que se esta cargando (lineal, RGBA; 1,1,1,1 = sin tinte). El glTF dice que el color
+   del material MULTIPLICA a la textura: arena = textura gris x factor naranja, y los materiales sin textura real
+   (una textura blanca de 8x8) solo tienen color por este factor. texture_from_surface() lo hornea en los pixeles. */
+static float g_gltf_tint[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+static int gltf_tint_is_white(const float *t) {
+    return t[0] >= 0.995f && t[1] >= 0.995f && t[2] >= 0.995f && t[3] >= 0.995f;
+}
+static float srgb_to_lin(float c) { return c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f); }
+static float lin_to_srgb(float c) { return c <= 0.0031308f ? c * 12.92f : 1.055f * powf(c, 1.0f / 2.4f) - 0.055f; }
+
 /* Build a G3DTexture (RGBA, uploaded) from an SDL_Surface. */
 static G3DTexture *texture_from_surface(SDL_Surface *src) {
     if (!src)
@@ -144,6 +154,22 @@ static G3DTexture *texture_from_surface(SDL_Surface *src) {
                (size_t)rgba->w * 4);
     }
     SDL_FreeSurface(rgba);
+    if (!gltf_tint_is_white(g_gltf_tint)) {
+        /* tabla: color sRGB de 8 bits -> sRGB tras multiplicar en lineal por el factor del canal */
+        uint8_t lut[3][256];
+        for (int c = 0; c < 3; c++)
+            for (int v = 0; v < 256; v++) {
+                float o = lin_to_srgb(srgb_to_lin(v / 255.0f) * g_gltf_tint[c]);
+                lut[c][v] = (uint8_t)(o < 0.0f ? 0 : (o > 1.0f ? 255 : o * 255.0f + 0.5f));
+            }
+        for (size_t i = 0; i + 3 < tex->data_size; i += 4) {
+            tex->data[i]     = lut[0][tex->data[i]];
+            tex->data[i + 1] = lut[1][tex->data[i + 1]];
+            tex->data[i + 2] = lut[2][tex->data[i + 2]];
+            float a = tex->data[i + 3] * g_gltf_tint[3];
+            tex->data[i + 3] = (uint8_t)(a > 255.0f ? 255 : a + 0.5f);
+        }
+    }
     g3d_texture_defer_upload(tex);   /* uploaded by g3d_texture_flush_pending() */
     return tex;
 }
@@ -203,9 +229,11 @@ static G3DTexture *load_image_texture(cgltf_image *img, const char *gltf_path) {
     char key[1024];
     if (img->buffer_view) {
         cgltf_buffer_view *bv = img->buffer_view;
-        snprintf(key, sizeof(key), "E|%s|%zu|%zu", gltf_path ? gltf_path : "", (size_t)bv->offset, (size_t)bv->size);
+        snprintf(key, sizeof(key), "E|%s|%zu|%zu|%.3f,%.3f,%.3f,%.3f", gltf_path ? gltf_path : "", (size_t)bv->offset, (size_t)bv->size,
+                 g_gltf_tint[0], g_gltf_tint[1], g_gltf_tint[2], g_gltf_tint[3]);
     } else if (img->uri && strncmp(img->uri, "data:", 5) != 0) {
-        snprintf(key, sizeof(key), "F|%s|%s", gltf_path ? gltf_path : "", img->uri);
+        snprintf(key, sizeof(key), "F|%s|%s|%.3f,%.3f,%.3f,%.3f", gltf_path ? gltf_path : "", img->uri,
+                 g_gltf_tint[0], g_gltf_tint[1], g_gltf_tint[2], g_gltf_tint[3]);
     } else {
         return load_image_texture_uncached(img, gltf_path);
     }
@@ -303,9 +331,28 @@ static int gltf_is_outline_material(cgltf_material *mat) {
 static G3DTexture *gltf_load_base_color(cgltf_material *mat,
                                         const char *gltf_path) {
     cgltf_texture *t = pick_albedo_texture(mat);
-    if (!t || !t->image)
-        return NULL;
+    /* color del material (baseColorFactor): solo cuenta si la textura es la de color base, no la emisiva de reserva */
+    float f[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    int es_base = mat && mat->has_pbr_metallic_roughness;
+    if (es_base)
+        for (int k = 0; k < 4; k++) f[k] = mat->pbr_metallic_roughness.base_color_factor[k];
+    if (!t || !t->image) {
+        /* sin textura pero con color propio: una textura de un solo color (los contornos de cel shading se quedan sin ella) */
+        if (!es_base || gltf_tint_is_white(f) || gltf_is_outline_material(mat))
+            return NULL;
+        SDL_Surface *s1 = SDL_CreateRGBSurfaceWithFormat(0, 2, 2, 32, SDL_PIXELFORMAT_ABGR8888);
+        if (!s1) return NULL;
+        SDL_FillRect(s1, NULL, SDL_MapRGBA(s1->format, 255, 255, 255, 255));
+        memcpy(g_gltf_tint, f, sizeof(f));
+        G3DTexture *solid = texture_from_surface(s1);
+        g_gltf_tint[0] = g_gltf_tint[1] = g_gltf_tint[2] = g_gltf_tint[3] = 1.0f;
+        SDL_FreeSurface(s1);
+        return solid;
+    }
+    if (mat->has_pbr_metallic_roughness && t == mat->pbr_metallic_roughness.base_color_texture.texture)
+        memcpy(g_gltf_tint, f, sizeof(f));
     G3DTexture *tex = load_image_texture(t->image, gltf_path);
+    g_gltf_tint[0] = g_gltf_tint[1] = g_gltf_tint[2] = g_gltf_tint[3] = 1.0f;
     if (!tex)
         fprintf(stderr, "G3D: glTF base-colour texture could not be decoded\n");
     return tex;
@@ -611,10 +658,12 @@ static int split_into_chunks(const G3DMesh *src, void *tex, float cell,
 
 /* Chunk every oversized submesh. Replaces the arrays with the new (larger) set.
    cell <= 0 disables. */
-static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell) {
+static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell, unsigned char **poutline) {
     G3DMesh *src = *pmeshes;
     void **stex = *ptex;
     int n = *psub;
+    /* origen de cada trozo: de que submalla original sale (para repartir la marca de contorno, que va por submalla) */
+    int *origin = NULL; int origin_cap = 0;
 
     G3DMesh *list = NULL; void **tlist = NULL;
     int count = 0, cap = 0;
@@ -622,6 +671,7 @@ static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell) 
 
     for (int s = 0; s < n; s++) {
         int made = 0;
+        int count_before = count;
         if (cell > 0.0f) {
             float dx = src[s].aabb_max[0] - src[s].aabb_min[0];
             float dz = src[s].aabb_max[2] - src[s].aabb_min[2];
@@ -643,7 +693,26 @@ static void chunk_model(G3DMesh **pmeshes, void ***ptex, int *psub, float cell) 
             tlist[count] = stex[s];
             count++;
         }
+        if (origin_cap < count) {
+            origin_cap = count * 2 + 16;
+            origin = (int *)realloc(origin, (size_t)origin_cap * sizeof(int));
+        }
+        for (int q = count_before; q < count; q++) origin[q] = s;
     }
+
+    /* La marca de contorno va por submalla: al trocear hay mas submallas que materiales, asi que se reconstruye con el
+       mismo orden. Sin esto g3d_model_spawn leia mas alla del final del array y marcaba trozos al azar como contorno
+       (se dibujan con las caras delanteras descartadas: invisibles desde fuera, huecos en el mapa). */
+    if (poutline && *poutline) {
+        unsigned char *old_out = *poutline;
+        unsigned char *new_out = (unsigned char *)calloc((size_t)count + 1, 1);
+        if (new_out) {
+            for (int q = 0; q < count; q++) new_out[q] = old_out[origin[q]];
+            free(old_out);
+            *poutline = new_out;
+        }
+    }
+    free(origin);
 
     free(src);
     free(stex);
@@ -1055,12 +1124,16 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
             cell = (diag > 150.0f) ? (diag / 6.0f) : 0.0f;
         }
         if (cell > 0.0f) {
-            chunk_model(&meshes, &textures, &sub, cell);
+            chunk_model(&meshes, &textures, &sub, cell, &outline);
             /* The chunked arrays are sized exactly: make room for the animated
                node submeshes appended after the recenter. */
             if (anim_node_meshes > 0) {
                 meshes = (G3DMesh *)realloc(meshes, (size_t)(sub + anim_node_meshes) * sizeof(G3DMesh));
                 textures = (void **)realloc(textures, (size_t)(sub + anim_node_meshes) * sizeof(void *));
+                if (outline) {
+                    outline = (unsigned char *)realloc(outline, (size_t)(sub + anim_node_meshes) + 1);
+                    if (outline) memset(outline + sub, 0, (size_t)anim_node_meshes + 1);
+                }
             }
         }
     }
