@@ -231,8 +231,16 @@ void g3d_model_set_lock_root(G3DModel *model, int enable) {
         model->lock_root = enable ? 1 : 0;
 }
 
+/* Un modelo se puede animar si tiene nodos con su pose: lleve esqueleto (personajes) o no (puertas, aspas, toldos: solo
+   animacion de nodos). Antes se exigia 'skinned' y los modelos sin esqueleto ignoraban animate/animate_blend/rest_pose, de modo
+   que solo g3d_model_animate_all los movia (y todas las animaciones a la vez). apply_pose() ya tolera 0 articulaciones. */
+static int model_animable(const G3DModel *model) {
+    return model && model->node_count > 0 && model->node_cur_t && model->node_cur_r && model->node_cur_s &&
+           model->node_base_t && model->node_global;
+}
+
 void g3d_model_rest_pose(G3DModel *model) {
-    if (!model || !model->skinned)
+    if (!model_animable(model))
         return;
     for (int n = 0; n < model->node_count; n++) {
         model->node_cur_t[n] = model->node_base_t[n];
@@ -275,7 +283,7 @@ static void sample_pose(G3DModel *model, int anim, float time, int loop,
 }
 
 void g3d_model_animate(G3DModel *model, int anim, float time, int loop) {
-    if (!model || !model->skinned)
+    if (!model_animable(model))
         return;
 
     sample_pose(model, anim, time, loop,
@@ -350,7 +358,7 @@ void g3d_model_animate_all(G3DModel *model, float time, int loop) {
    (lerp translation/scale, slerp rotation). Great for idle<->walk<->run. */
 void g3d_model_animate_blend(G3DModel *model, int a0, float t0,
                              int a1, float t1, float weight, int loop) {
-    if (!model || !model->skinned)
+    if (!model_animable(model))
         return;
     if (weight <= 0.001f) { g3d_model_animate(model, a0, t0, loop); return; }
     if (weight >= 0.999f) { g3d_model_animate(model, a1, t1, loop); return; }

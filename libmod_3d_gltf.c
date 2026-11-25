@@ -12,6 +12,7 @@ static double g3d_prof_now(void);
 #include "cgltf.h"
 
 #include "libmod_3d_gltf.h"
+#include "libmod_3d_anim.h"
 #include "libmod_3d_texture.h"
 #include "libmod_3d_math.h"
 #include <stdio.h>
@@ -1197,6 +1198,10 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
         model->skin_offset[0] = off[0];
         model->skin_offset[1] = off[1];
         model->skin_offset[2] = off[2];
+        /* Modelo con animacion de nodos pero sin esqueleto (puertas, aspas...): node_global nace sin inicializar y el
+           renderizador lo aplica a las piezas animadas, que salian invisibles hasta la primera animacion. Se calcula el reposo. */
+        if (!model->skinned)
+            g3d_model_rest_pose(model);
     }
 
     printf("G3D: glTF loaded: %s (%d submeshes, images=%d materials=%d, h=%.2f, anims=%d, joints=%d)\n",
