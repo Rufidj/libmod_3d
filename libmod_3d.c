@@ -1101,6 +1101,7 @@ int g3d_physics_submesh_geom(void *mp, int i, const float **pos, int *stride_flo
     if (!m || i < 0 || i >= (int)m->mesh_count) return 0;
     G3DMesh *mesh = &m->meshes[i];
     if (!mesh->vertices || mesh->vertex_count == 0) return 0;
+    if (m->mesh_outline && m->mesh_outline[i] == 2) return 0;        /* agua: no hace de suelo ni de pared */
     if (pos)           *pos = mesh->vertices[0].position;
     if (stride_floats) *stride_floats = (int)(sizeof(G3DVertex) / sizeof(float));
     if (indices)       *indices = mesh->indices;
@@ -1199,7 +1200,7 @@ int g3d_model_spawn(int scene_id, void *model_ptr, float x, float y, float z,
         /* La cascara de contorno no lleva texturas, igual que otros materiales
            planos, asi que entra en la clave: si no, se fusionarian y el contorno
            acabaria aplicandose a piezas que no lo son (o al reves). */
-        unsigned char outl = model->mesh_outline ? model->mesh_outline[j] : 0;
+        unsigned char outl = (model->mesh_outline && model->mesh_outline[j] == 1) ? 1 : 0;   /* 2 = agua (sin colision), no es contorno */
 
         int mat = -1;
         if (key_mat) {
@@ -2639,6 +2640,8 @@ int64_t g3d_collider_clear_bgd(INSTANCE *my, int64_t *params) { g3d_collider_cle
    apagado (hoy PS5, mientras se porta Jolt por separado) no hay a que
    llamar, asi que degradan a "no se pudo" en vez de dejar sin definir. */
 #ifdef USE_JOLT
+extern void g3d_jolt_set_ground(int on);
+int64_t g3d_jolt_ground_bgd(INSTANCE *my, int64_t *params) { g3d_jolt_set_ground((int)params[0]); return 1; }
 extern float g3d_jolt_ray_dist(float ox, float oy, float oz, float dx, float dy, float dz, float maxd);
 int64_t g3d_wall_ray_bgd(INSTANCE *my, int64_t *params) {
     float v = g3d_jolt_ray_dist(*(float*)&params[0], *(float*)&params[1], *(float*)&params[2], *(float*)&params[3], *(float*)&params[4], *(float*)&params[5], *(float*)&params[6]);
@@ -2658,6 +2661,7 @@ int64_t g3d_rigidbody_create_convex_model_bgd(INSTANCE *my, int64_t *params) {
                                              *(float*)&params[4], *(float*)&params[5]);
 }
 #else
+int64_t g3d_jolt_ground_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return 0; }
 int64_t g3d_wall_ray_bgd(INSTANCE *my, int64_t *params) { (void)my; float v = *(float*)&params[6]; return (int64_t) * (int32_t *)&v; }
 int64_t g3d_collider_add_model_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }
 int64_t g3d_collider_add_model_yaw_bgd(INSTANCE *my, int64_t *params) { (void)my; (void)params; return -1; }

@@ -75,6 +75,8 @@ static OvBImpl g_ovb;
 static OLPImpl g_olp;
 static bool    g_inited   = false;
 static bool    g_terrain_added = false;
+static bool    g_terrain_has = false;      /* hay un cuerpo de terreno creado */
+static BodyID  g_terrain_bid;
 static float   g_gravity  = 24.0f;
 
 struct JRBody { BodyID id; float hx, hy, hz; float ox, oy, oz; int active; float upright;
@@ -121,7 +123,8 @@ static void jolt_add_terrain() {
     BodyCreationSettings bcs(r.Get(), RVec3::sZero(), Quat::sIdentity(),
                              EMotionType::Static, Layers::NON_MOVING);
     bcs.mFriction = 0.6f;
-    g_ps->GetBodyInterface().CreateAndAddBody(bcs, EActivation::DontActivate);
+    g_terrain_bid = g_ps->GetBodyInterface().CreateAndAddBody(bcs, EActivation::DontActivate);
+    g_terrain_has = true;
     g_ps->OptimizeBroadPhase();
 }
 
@@ -130,6 +133,19 @@ static inline bool jrb_ok(int id) { return id >= 0 && id < JRB_MAX && g_rb[id].a
 
 /* ============================ C API ==================================== */
 extern "C" {
+
+/* Terreno de la escena como suelo de Jolt: on = 1 (por defecto) lo crea al primer paso; on = 0 lo quita y no lo vuelve a crear.
+   Hace falta apagarlo cuando el nivel es una malla con zonas POR DEBAJO de y = 0 (tuneles, trincheras): un terreno plano en
+   y = 0 haria de tapa sobre la carretera. */
+void g3d_jolt_set_ground(int on) {
+    if (on) { if (!g_terrain_has) g_terrain_added = false; return; }
+    g_terrain_added = true;
+    if (g_terrain_has && g_ps) {
+        BodyInterface &bi = g_ps->GetBodyInterface();
+        bi.RemoveBody(g_terrain_bid); bi.DestroyBody(g_terrain_bid);
+        g_terrain_has = false;
+    }
+}
 
 /* Called by g3d_physics_set_gravity (which lives in libmod_3d_physics.c and also
    drives the char controller / vehicle). */

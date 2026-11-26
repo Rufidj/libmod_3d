@@ -307,6 +307,17 @@ static G3DTexture *load_image_texture_uncached(cgltf_image *img, const char *glt
    Se reconoce por el nombre del material (toon/outline/contour/cel) o por ser
    negro puro sin textura de color base, que es la firma habitual.
    Si acertara de mas, se puede corregir con g3d_material_set_outline(). */
+/* 1 = el material es AGUA (nombre con "agua" o "water"): su superficie no debe tener colision solida. Un lago o un oasis es solo
+   la capa visible; el suelo real esta debajo (un tunel bajo el agua, un vado). Se marca con el valor 2 en mesh_outline. */
+static int gltf_is_water_material(cgltf_material *mat) {
+    if (!mat || !mat->name) return 0;
+    char low[128]; size_t n = 0;
+    for (const char *c = mat->name; *c && n < sizeof(low) - 1; c++, n++)
+        low[n] = (*c >= 'A' && *c <= 'Z') ? (char)(*c + 32) : *c;
+    low[n] = 0;
+    return strstr(low, "agua") != NULL || strstr(low, "water") != NULL;
+}
+
 static int gltf_is_outline_material(cgltf_material *mat) {
     if (!mat) return 0;
 
@@ -1075,7 +1086,7 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
         z0 = g3d_prof_now();
         textures[sub] = gltf_load_base_color(&data->materials[m], filepath);
         pf_tex += g3d_prof_now() - z0;
-        if (outline) outline[sub] = (unsigned char)gltf_is_outline_material(&data->materials[m]);
+        if (outline) outline[sub] = (unsigned char)(gltf_is_outline_material(&data->materials[m]) ? 1 : (gltf_is_water_material(&data->materials[m]) ? 2 : 0));
         sub++;
     }
     /* Primitives without a material */
@@ -1197,6 +1208,7 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
         meshes[sub] = *sm;
         free(sm);
         textures[sub] = mats_n[mi] ? gltf_load_base_color(mats_n[mi], filepath) : NULL;
+        if (outline && gltf_is_water_material(mats_n[mi])) outline[sub] = 2;      /* agua animada: sin colision */
         sub++;
         }
     }
