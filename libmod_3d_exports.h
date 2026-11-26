@@ -391,6 +391,8 @@ int64_t g3d_flow_set_speed_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_waterfall_add_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_flow_set_clip_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_fx_emit_bgd(INSTANCE *my, int64_t *params);
+int64_t g3d_fx_clear_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_particles_create_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_particles_set_color_bgd(INSTANCE *my, int64_t *params);
 int64_t g3d_particles_set_floor_bgd(INSTANCE *my, int64_t *params);
@@ -774,6 +776,8 @@ DLSYSFUNCS __bgdexport( libmod_3d, functions_exports )[] = {
     FUNC("G3D_WATER_SET_UNDERWATER_LOOK", "FF", TYPE_INT, g3d_water_set_underwater_look_bgd),
     FUNC("G3D_FIRE_ADD", "FFFF", TYPE_INT, g3d_fire_add_bgd),
     FUNC("G3D_FIRE_CLEAR", "", TYPE_INT, g3d_fire_clear_bgd),
+    FUNC("G3D_FX_EMIT", "IIFFFFFFFFFFFFFF", TYPE_INT, g3d_fx_emit_bgd),
+    FUNC("G3D_FX_CLEAR", "", TYPE_INT, g3d_fx_clear_bgd),
     FUNC("G3D_WATER_CREATE", "FFI", TYPE_INT, g3d_water_create_bgd),
     FUNC("G3D_FLUID_ADD", "FFFFFF", TYPE_INT, g3d_fluid_add_bgd),
     FUNC("G3D_FLUID_CLEAR", "", TYPE_INT, g3d_fluid_clear_bgd),

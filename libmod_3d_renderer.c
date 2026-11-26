@@ -30,6 +30,7 @@ static int g3d_dev_cfg(const char *key, int def);
 #include "libmod_3d_particles.h"
 #include "libmod_3d_water_splash.h"
 #include "libmod_3d_fire.h"
+#include "libmod_3d_fx.h"
 #include "libmod_3d_sky.h"
 #include "libmod_3d_ibl.h"
 #include "libmod_3d_occlusion.h"
@@ -1899,6 +1900,7 @@ void g3d_renderer_render(void) {
     g3d_particles_update_render(g_renderer.active_camera, g_renderer.flip_y);
     G3D_STG("g3d_particles_update_render");
     g3d_fire_render(g_renderer.active_camera, g_renderer.flip_y);   /* torch/campfire flames */
+    g3d_fx_render(g_renderer.active_camera, g_renderer.flip_y);     /* humo, llamas y chispas del juego */
     G3D_STG("fire");
     g3d_renderer_underwater_pass();   /* fullscreen tint+wobble if camera is submerged */
     G3D_STG("underwater");

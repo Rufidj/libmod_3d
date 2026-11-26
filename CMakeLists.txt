@@ -121,6 +121,7 @@ set(SOURCES_LIBMOD_3D
     libmod_3d_flow.c
     libmod_3d_particles.c
     libmod_3d_fire.c
+    libmod_3d_fx.c
     libmod_3d_sprite.c
     libmod_3d_sky.c
     libmod_3d_ibl.c
