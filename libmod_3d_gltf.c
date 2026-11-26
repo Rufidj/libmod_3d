@@ -359,6 +359,11 @@ static G3DTexture *gltf_load_base_color(cgltf_material *mat,
     return tex;
 }
 
+/* Filtro opcional por material cuando build_submesh se usa con only_node: una pieza animada con varios materiales se parte en una
+   submalla por material (cada una con su textura). Sin esto toda la pieza usaba la textura de su PRIMERA primitiva. */
+static int g_node_mat_filter = 0;
+static cgltf_material *g_node_mat = NULL;
+
 /* Build one submesh from every triangle primitive that uses `target` material
    (target == NULL collects primitives with no material). If only_node != NULL
    the material filter is ignored and only that node's primitives are collected
@@ -406,7 +411,9 @@ static G3DMesh *build_submesh(cgltf_data *data, cgltf_material *target,
             cgltf_primitive *prim = &mesh->primitives[pi];
             if (prim->type != cgltf_primitive_type_triangles)
                 continue;
-            if (!only_node && prim->material != target)
+            if (only_node) {
+                if (g_node_mat_filter && prim->material != g_node_mat) continue;
+            } else if (prim->material != target)
                 continue;
 
             cgltf_accessor *a_pos = NULL, *a_nrm = NULL, *a_uv = NULL, *a_col = NULL;
@@ -1042,7 +1049,7 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
         for (cgltf_node *p = &data->nodes[ni]; p; p = p->parent) {
             if (anim_root[(cgltf_size)(p - data->nodes)]) { under = 1; break; }
         }
-        if (under) { anim_flag[ni] = 1; anim_node_meshes++; }
+        if (under) { anim_flag[ni] = 1; anim_node_meshes += (int)data->nodes[ni].mesh->primitives_count; }   /* como mucho una pieza por material */
     }
     free(anim_root);
 
@@ -1082,7 +1089,9 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
         }
     }
 
-    if (sub == 0) {
+    /* Un modelo cuyas UNICAS piezas cuelgan de un nodo animado (una caja que gira, una concha) no tiene mallas fijas: sub == 0 aqui, pero
+       las piezas animadas se anaden mas abajo. Solo es un error si tampoco hay piezas animadas. */
+    if (sub == 0 && anim_node_meshes == 0) {
         fprintf(stderr, "G3D: glTF has no triangle geometry: %s\n", filepath);
         free(anim_flag); free(meshes); free(textures); cgltf_free(data);
         return NULL;
@@ -1154,8 +1163,19 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
     for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
         if (!anim_flag[ni]) continue;
         cgltf_node *node = &data->nodes[ni];
-        G3DMesh *sm = build_submesh(data, NULL, node, NULL, 1);
-        if (!sm) continue;
+        /* materiales distintos de las primitivas de este nodo (una submalla por cada uno) */
+        cgltf_material *mats_n[64]; int nm_n = 0;
+        for (cgltf_size pi = 0; pi < node->mesh->primitives_count && nm_n < 64; pi++) {
+            cgltf_material *pm = node->mesh->primitives[pi].material;
+            int ya = 0;
+            for (int q = 0; q < nm_n; q++) if (mats_n[q] == pm) { ya = 1; break; }
+            if (!ya) mats_n[nm_n++] = pm;
+        }
+        for (int mi = 0; mi < nm_n; mi++) {
+            g_node_mat_filter = 1; g_node_mat = mats_n[mi];
+            G3DMesh *sm = build_submesh(data, NULL, node, NULL, 1);
+            g_node_mat_filter = 0;
+            if (!sm) continue;
         sm->anim_node = (int)ni;
         float M[16];
         cgltf_node_transform_world(node, M);   /* rest world transform */
@@ -1176,10 +1196,9 @@ G3DModel *g3d_gltf_load_impl_timed(const char *filepath) {
         g3d_mesh_upload_gpu(sm);
         meshes[sub] = *sm;
         free(sm);
-        cgltf_material *nmat = (node->mesh->primitives_count > 0)
-                             ? node->mesh->primitives[0].material : NULL;
-        textures[sub] = nmat ? gltf_load_base_color(nmat, filepath) : NULL;
+        textures[sub] = mats_n[mi] ? gltf_load_base_color(mats_n[mi], filepath) : NULL;
         sub++;
+        }
     }
     free(anim_flag);
 

@@ -81,6 +81,15 @@ int g3d_entity_impl_destroy(int entity_id) {
     return 1;
 }
 
+/* Desactiva TODAS las entidades que pertenecen a una escena (la usa g3d_scene_destroy). Recorre toda la reserva en vez de ir
+   quitando las de la lista de la escena: esa lista se corta en cuanto una ya estaba inactiva (p. ej. un hijo borrado junto a su
+   padre) y el resto se quedaba vivo, con el indice de una escena que ya no existe. */
+void g3d_entity_impl_destroy_all_in_scene(int scene_id) {
+    for (int i = 0; i < g_entity_count; i++)
+        if (g_entities[i].active && g_entities[i].scene_id == scene_id)
+            g_entities[i].active = 0;
+}
+
 /* Floating origin: shift every root entity (children move with their parent) by
    (-dx,-dy,-dz). The game calls this when the camera drifts far from the origin
    so world coordinates stay small (float precision). Physics is rebased

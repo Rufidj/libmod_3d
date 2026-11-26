@@ -18,7 +18,12 @@ int g3d_scene_impl_create(const char *name) {
         return -1;
     }
 
-    int scene_id = g_scene_count++;
+    /* Reutiliza el hueco de una escena destruida (sus arrays se liberan y quedan a NULL): sin esto solo se podian crear 16 escenas
+       en toda la partida, y un juego que cambia de mapa a carrera y vuelta las gasta. */
+    int scene_id = -1;
+    for (int i = 0; i < g_scene_count; i++)
+        if (!g_scenes[i].entity_ids) { scene_id = i; break; }
+    if (scene_id < 0) scene_id = g_scene_count++;
     G3DScene *scene = &g_scenes[scene_id];
 
     memset(scene, 0, sizeof(G3DScene));
@@ -52,14 +57,15 @@ int g3d_scene_impl_destroy(int scene_id) {
 
     G3DScene *scene = &g_scenes[scene_id];
 
-    /* Las entidades de la escena se van con ella: si no, se quedan activas (y, p. ej., ocluyen lo de la escena siguiente) */
-    if (scene->entity_ids)
-        while (scene->entity_count > 0 && scene->entity_ids[scene->entity_count - 1] >= 0 && g3d_entity_impl_destroy(scene->entity_ids[scene->entity_count - 1])) {}
+    if (!scene->entity_ids)
+        return 0;                                  /* ya estaba destruida */
 
-    if (scene->entity_ids)
-        free(scene->entity_ids);
-    if (scene->light_ids)
-        free(scene->light_ids);
+    /* Las entidades de la escena se van con ella: si no, se quedan activas (y, p. ej., ocluyen lo de la escena siguiente) */
+    g3d_entity_impl_destroy_all_in_scene(scene_id);
+
+    free(scene->entity_ids);  scene->entity_ids = NULL;
+    if (scene->light_ids) { free(scene->light_ids); scene->light_ids = NULL; }
+    scene->entity_count = 0;
 
     if (g_active_scene_id == scene_id)
         g_active_scene_id = -1;
