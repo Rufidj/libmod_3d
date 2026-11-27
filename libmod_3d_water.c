@@ -864,7 +864,7 @@ void g3d_water_render_pass(G3DCamera *camera, int flip_y) {
 
 /* ---- Fluid zones ------------------------------------------------------- */
 
-#define MAX_FLUIDS 64
+#define MAX_FLUIDS 192
 
 typedef struct {
     float cx, cz, level, depth;

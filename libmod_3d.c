@@ -1777,6 +1777,11 @@ int64_t g3d_lake_spill_level_bgd(INSTANCE *my, int64_t *params) {
     float v = g3d_lake_spill_level(*(float *)&params[0], *(float *)&params[1]);
     return (int64_t) * (int32_t *)&v;
 }
+/* Material de TODAS las zonas de fluido: 0 = agua, 1 = lava (brillante, espesa, opaca, sin reflejo). */
+int64_t g3d_fluid_kind_bgd(INSTANCE *my, int64_t *params) {
+    g3d_fluid_set_kind((int)params[0]);
+    return 1;
+}
 int64_t g3d_fluid_style_bgd(INSTANCE *my, int64_t *params) {
     g3d_fluid_set_style(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2],
                         *(float *)&params[3], *(float *)&params[4], *(float *)&params[5],
