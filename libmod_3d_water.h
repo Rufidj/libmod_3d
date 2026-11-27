@@ -96,6 +96,8 @@ void g3d_fluid_set_style(float amp, float len, float speed,
 /* Add a fluid zone from a caller-built world-space mesh (e.g. a flood-filled
    lake). Engine takes ownership of the mesh. depth deepens the colour. */
 int g3d_fluid_add_mesh(G3DMesh *mesh, float depth);
+/* Zona de fluido desde un fichero binario de malla (orilla ajustada al terreno); ver libmod_3d_water.c. */
+int g3d_fluid_add_file(const char *path, float depth);
 /* Nivel del agua (mar/lago/rio) en un punto, o muy negativo si no hay. */
 float g3d_water_level_at(float x, float z);
 void g3d_fluid_set_texture(unsigned int gl_handle);

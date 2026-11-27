@@ -985,6 +985,31 @@ int g3d_fluid_add_mesh(G3DMesh *mesh, float depth) {
     return g_fluid.count++;
 }
 
+/* Zona de fluido desde un fichero de malla (generado por una herramienta a partir del terreno): el agua se ajusta a la orilla.
+   Formato (little endian): uint32 nv, uint32 ni, nv * (x, y, z, profundidad: 4 floats), ni * uint32 (triangulos).
+   La profundidad (agua menos suelo) en cada vertice da el degradado de la orilla. Devuelve la zona o -1. */
+int g3d_fluid_add_file(const char *path, float depth) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return -1;
+    uint32_t nv = 0, ni = 0;
+    if (fread(&nv, 4, 1, f) != 1 || fread(&ni, 4, 1, f) != 1 || nv < 3 || ni < 3 || nv > 4000000u || ni > 12000000u) { fclose(f); return -1; }
+    G3DVertex *verts = (G3DVertex *)calloc(nv, sizeof(G3DVertex));
+    uint32_t *idx = (uint32_t *)malloc((size_t)ni * sizeof(uint32_t));
+    float *tmp = (float *)malloc((size_t)nv * 4 * sizeof(float));
+    int ok = verts && idx && tmp && fread(tmp, 16, nv, f) == nv && fread(idx, 4, ni, f) == ni;
+    fclose(f);
+    if (!ok) { free(verts); free(idx); free(tmp); return -1; }
+    for (uint32_t i = 0; i < nv; i++) {
+        verts[i].position[0] = tmp[i*4]; verts[i].position[1] = tmp[i*4+1]; verts[i].position[2] = tmp[i*4+2];
+        verts[i].normal[1] = 1.0f; verts[i].texcoord[0] = tmp[i*4+3]; verts[i].texcoord[1] = 0.0f;
+    }
+    G3DMesh *mesh = g3d_mesh_create("agua_fichero", verts, nv, idx, ni);
+    free(verts); free(idx); free(tmp);
+    if (!mesh) return -1;
+    g3d_mesh_upload_gpu(mesh);
+    return g3d_fluid_add_mesh(mesh, depth);
+}
+
 /* Nivel del AGUA en un punto del mundo (x,z): mira las zonas de fluido (lagos y
    rios) y el plano de agua global, y devuelve la superficie mas alta que cubra ese
    punto. Si no hay agua ahi, devuelve un valor muy negativo. Lo usan los objetos

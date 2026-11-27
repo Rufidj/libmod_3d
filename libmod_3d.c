@@ -1777,6 +1777,14 @@ int64_t g3d_lake_spill_level_bgd(INSTANCE *my, int64_t *params) {
     float v = g3d_lake_spill_level(*(float *)&params[0], *(float *)&params[1]);
     return (int64_t) * (int32_t *)&v;
 }
+/* Zona de fluido desde un fichero de malla (agua que sigue la orilla del terreno). */
+int64_t g3d_fluid_add_file_bgd(INSTANCE *my, int64_t *params) {
+    g3d_ensure_init();
+    const char *filename = (const char *)string_get(params[0]);
+    int r = g3d_fluid_add_file(filename, *(float *)&params[1]);
+    string_discard(params[0]);
+    return (int64_t)r;
+}
 /* Material de TODAS las zonas de fluido: 0 = agua, 1 = lava (brillante, espesa, opaca, sin reflejo). */
 int64_t g3d_fluid_kind_bgd(INSTANCE *my, int64_t *params) {
     g3d_fluid_set_kind((int)params[0]);
