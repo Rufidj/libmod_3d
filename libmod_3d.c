@@ -23,6 +23,7 @@
 #include "libmod_3d_watersim.h"
 #include "libmod_3d_fire.h"
 #include "libmod_3d_fx.h"
+#include "libmod_3d_weather.h"
 #include "libmod_3d_obj.h"
 #include "libmod_3d_fbx.h"
 #include "libmod_3d_flow.h"
@@ -1102,6 +1103,16 @@ int g3d_physics_submesh_geom(void *mp, int i, const float **pos, int *stride_flo
     G3DMesh *mesh = &m->meshes[i];
     if (!mesh->vertices || mesh->vertex_count == 0) return 0;
     if (m->mesh_outline && m->mesh_outline[i] == 2) return 0;        /* agua: no hace de suelo ni de pared */
+    if (mesh->anim_node >= 0) {
+        /* pieza animada: sus vertices estan en el espacio LOCAL del nodo; la colision (estatica) usa su pose de
+           reposo ya colocada. Sin esa copia no colisiona (antes se apilaba, invisible, en el origen del modelo). */
+        if (!mesh->phys_pos) return 0;
+        if (pos)           *pos = mesh->phys_pos;
+        if (stride_floats) *stride_floats = 3;
+        if (indices)       *indices = mesh->indices;
+        if (icount)        *icount = (int)mesh->index_count;
+        return (int)mesh->vertex_count;
+    }
     if (pos)           *pos = mesh->vertices[0].position;
     if (stride_floats) *stride_floats = (int)(sizeof(G3DVertex) / sizeof(float));
     if (indices)       *indices = mesh->indices;
@@ -1649,6 +1660,14 @@ int64_t g3d_fx_emit_bgd(INSTANCE *my, int64_t *params) {
     return 1;
 }
 int64_t g3d_fx_clear_bgd(INSTANCE *my, int64_t *params) { g3d_fx_clear(); return 1; }
+
+/* Clima: nieve y lluvia (ver libmod_3d_weather.h). */
+int64_t g3d_weather_set_bgd(INSTANCE *my, int64_t *params) { g3d_weather_set((int)params[0], *(float *)&params[1]); return 1; }
+int64_t g3d_weather_wind_bgd(INSTANCE *my, int64_t *params) { g3d_weather_set_wind(*(float *)&params[0], *(float *)&params[1]); return 1; }
+int64_t g3d_weather_style_bgd(INSTANCE *my, int64_t *params) {
+    g3d_weather_set_style(*(float *)&params[0], *(float *)&params[1], *(float *)&params[2], *(float *)&params[3], *(float *)&params[4], *(float *)&params[5]);
+    return 1;
+}
 int64_t g3d_fire_clear_bgd(INSTANCE *my, int64_t *params) {
     g3d_fire_clear();
     return 1;

@@ -399,6 +399,9 @@ procesos con `CSUBTYPE` = `C3D_ENTITY/LIGHT/CAMERA`.
 | `G3D_SET_CLEAR_COLOR` | `FFFF`→I | Color de borrado del fondo. |
 | `G3D_SET_AMBIENT_LIGHT` | `FFFF`→I | Luz ambiente `(r,g,b,intensidad)`. |
 | `G3D_SET_FOG` | `IFFFFF`→I | Niebla `(on, r, g, b, inicio, fin)`. |
+| `G3D_WEATHER_SET` | `IF`→I | **Clima**: `(tipo, intensidad)`. tipo 0 = nada, 1 = nieve, 2 = lluvia; intensidad 0..1 (cuántas partículas se ven: sube y baja poco a poco para entrar y salir de una zona). Las partículas las calcula la GPU alrededor de la cámara (no hay que emitirlas) y las paredes las tapan. |
+| `G3D_WEATHER_WIND` | `FF`→I | Viento horizontal `(x, z)` en m/s: los copos derivan; la lluvia, un poco. |
+| `G3D_WEATHER_STYLE` | `FFFFFF`→I | `(tamaño, velocidad_caída, r, g, b, lado_caja)`: multiplicadores (1 = normal), color y lado en m de la caja que sigue a la cámara (50 por defecto). Sin llamarla: nieve blanca y lluvia azulada. |
 | `G3D_SET_WIREFRAME_MODE` | `I`→I | Modo alambre on/off. |
 | `G3D_SET_SHADOWS` | `I`→I | Sombras globales on/off. |
 | `G3D_SET_HDR` | `I`→I | Render HDR on/off. |
