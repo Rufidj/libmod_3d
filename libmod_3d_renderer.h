@@ -77,7 +77,8 @@ typedef struct {
     float fog_end;
 
     /* Shadow mapping: light-space view-projection from the last shadow pass */
-    Mat4 light_space_matrix;
+    Mat4 light_space_matrix;      /* sombra del sol: cascada cercana (en el atlas, izquierda) */
+    Mat4 light_space_matrix2;     /* cascada lejana (arriba a la derecha del atlas); ver g3d_renderer_shadow_pass */
 
     /* Dynamic shadow maps for up to 4 spot/point lights (torches/flashlight) */
     uint32_t spot_shadow_framebuffer[4];
@@ -232,6 +233,7 @@ void g3d_renderer_set_underwater(int on, float r, float g, float b, float streng
 /* Shadow state (for other passes, e.g. instancing, to receive shadows). */
 uint32_t g3d_renderer_shadow_texture(void);
 Mat4 g3d_renderer_light_space(void);
+Mat4 g3d_renderer_light_space2(void);
 int g3d_renderer_shadows_on(void);
 
 /* Forward rendering pass (with lighting) */

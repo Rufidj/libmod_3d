@@ -124,7 +124,7 @@ int g3d_renderer_init(uint32_t width, uint32_t height) {
     glGenTextures(1, &g_renderer.shadow_texture);
     glBindTexture(GL_TEXTURE_2D, g_renderer.shadow_texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
-                 g_renderer.shadow_map_width, g_renderer.shadow_map_height, 0,
+                 g_renderer.shadow_map_width + g_renderer.shadow_map_width / 2, g_renderer.shadow_map_height, 0,     /* atlas: cascada cercana + lejana */
                  GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -418,7 +418,7 @@ void g3d_renderer_set_shadow_resolution(uint32_t resolution) {
     if (!g_renderer.initialized) return;
     glBindTexture(GL_TEXTURE_2D, g_renderer.shadow_texture);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
-                 resolution, resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+                 resolution + resolution / 2, resolution, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);     /* atlas de dos cascadas */
     for (int sc = 0; sc < 4; sc++) {
         glBindTexture(GL_TEXTURE_2D, g_renderer.spot_shadow_texture[sc]);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT,
@@ -588,6 +588,75 @@ void g3d_renderer_begin_frame(void) {
     g_renderer.entities_culled = 0;
 }
 
+/* ---- SOMBRA DEL SOL EN DOS CASCADAS (atlas) ----
+   El mapa de sombras es una sola textura de ancho 1,5 W por alto H (W = shadow_map_width):
+     - cascada CERCANA: ocupa x 0..W, y 0..H     (SHADOW_NEAR_EXTENT m de radio: nitida, alrededor de la camara)
+     - cascada LEJANA:  ocupa x W..1,5W, y 0..H/2 (SHADOW_FAR_EXTENT m de radio: sombras de lejos sin que aparezcan de golpe)
+   Los shaders eligen cascada por la distancia a la camara, las mezclan en el borde y desvanecen la lejana en su limite.
+   Cada cascada centra su ventana en un multiplo del texel (sin parpadeo al mover la camara). La lejana se redibuja cada
+   2 fotogramas (casi no cambia). */
+#define SHADOW_NEAR_EXTENT 60.0f
+#define SHADOW_FAR_EXTENT  300.0f
+#define SHADOW_DIST        120.0f
+
+uint32_t g3d_renderer_shadow_atlas_width(void) { return g_renderer.shadow_map_width + g_renderer.shadow_map_width / 2; }
+
+#ifndef VITA
+/* Dibuja la profundidad de la escena desde el sol en el rectangulo (vx, vy, vw, vh) del atlas, con una ventana de lado 2*extent. */
+static Mat4 shadow_render_cascade(Vec3 dir, Vec3 center, float extent, int vx, int vy, int vw, int vh) {
+    Vec3 up = (fabsf(dir.y) > 0.99f) ? vec3_make(0, 0, 1) : vec3_make(0, 1, 0);
+    /* centro ajustado a la rejilla de texels (en el plano perpendicular a la luz): la sombra no "nada" al mover la camara */
+    Vec3 right = vec3_normalize(vec3_cross(dir, up));
+    Vec3 upv = vec3_cross(right, dir);
+    float texel = (2.0f * extent) / (float)vw;
+    float cx = vec3_dot(center, right), cy = vec3_dot(center, upv);
+    float sx = floorf(cx / texel + 0.5f) * texel, sy = floorf(cy / texel + 0.5f) * texel;
+    center = vec3_add(center, vec3_add(vec3_scale(right, sx - cx), vec3_scale(upv, sy - cy)));
+    Vec3 eye = vec3_sub(center, vec3_scale(dir, SHADOW_DIST));
+    Mat4 light_view = mat4_look_at(eye, center, up);
+    Mat4 light_proj = mat4_ortho(-extent, extent, -extent, extent, 1.0f, SHADOW_DIST * 2.0f);
+    Mat4 lsm = mat4_multiply(light_proj, light_view);
+
+    glViewport(vx, vy, vw, vh);
+    glEnable(GL_SCISSOR_TEST); glScissor(vx, vy, vw, vh);
+    glClear(GL_DEPTH_BUFFER_BIT);                        /* solo la zona de esta cascada */
+    glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(2.0f, 4.0f);
+
+    G3DShaderProgram *sh = (G3DShaderProgram *)g_renderer.shadow_shader;
+    g3d_shader_use(sh);
+    g3d_shader_set_mat4(sh, "uLightSpaceMatrix", lsm);
+
+    int entity_count = 0;
+    int *entities = g3d_scene_impl_get_entities(&entity_count);
+    for (int i = 0; i < entity_count; i++) {
+        G3DEntity *e = g3d_entity_impl_get(entities[i]);
+        if (!e || !e->active || !e->mesh)
+            continue;
+        G3DMesh *m = (G3DMesh *)e->mesh;
+        Mat4 world = g3d_entity_impl_get_world_matrix(entities[i]);
+        g3d_shader_set_mat4(sh, "uModel", world);
+        glBindVertexArray(m->vao);
+        glDrawElements(GL_TRIANGLES, m->index_count, GL_UNSIGNED_INT, 0);
+    }
+    glBindVertexArray(0);
+
+    /* Instanced vegetation/props also cast shadows */
+    g3d_instances_render_depth(lsm);
+    /* Los sprites tambien proyectan sombra, con su mismo recorte alfa: es lo que
+       hace que un personaje dibujado se apoye de verdad en el suelo. */
+    g3d_sprites_render_depth(lsm.m);
+
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    return lsm;
+}
+#endif
+
 void g3d_renderer_shadow_pass(void) {
     {   /* dev tuning: refresh the sun shadow map only every Nth frame (map + matrix are kept) */
         static unsigned int n_ = 0;
@@ -612,8 +681,6 @@ void g3d_renderer_shadow_pass(void) {
     if (!main_light)
         return;
 
-    /* Build the light-space view-projection: an orthographic frustum looking
-       along the light direction, covering a fixed area around the origin. */
     Vec3 dir = vec3_normalize(main_light->direction);
     /* Center the shadow region on the camera (ground level) so the player's
        surroundings cast shadows in a big open world, not just the origin. */
@@ -622,53 +689,13 @@ void g3d_renderer_shadow_pass(void) {
         center.x = g_renderer.active_camera->position.x;
         center.z = g_renderer.active_camera->position.z;
     }
-    float extent = 60.0f;    /* half-size of the covered area */
-    float distance = 120.0f; /* how far back the light "eye" sits */
-    Vec3 eye = vec3_sub(center, vec3_scale(dir, distance));
-    Vec3 up = (fabsf(dir.y) > 0.99f) ? vec3_make(0, 0, 1) : vec3_make(0, 1, 0);
 
-    Mat4 light_view = mat4_look_at(eye, center, up);
-    Mat4 light_proj =
-        mat4_ortho(-extent, extent, -extent, extent, 1.0f, distance * 2.0f);
-    g_renderer.light_space_matrix = mat4_multiply(light_proj, light_view);
-
-    /* Render scene depth into the shadow framebuffer */
     glBindFramebuffer(GL_FRAMEBUFFER, g_renderer.shadow_framebuffer);
-    glViewport(0, 0, g_renderer.shadow_map_width, g_renderer.shadow_map_height);
-    glClear(GL_DEPTH_BUFFER_BIT);
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LEQUAL);
-    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-    /* Depth bias to avoid shadow acne */
-    glEnable(GL_POLYGON_OFFSET_FILL);
-    glPolygonOffset(2.0f, 4.0f);
-
-    G3DShaderProgram *sh = (G3DShaderProgram *)g_renderer.shadow_shader;
-    g3d_shader_use(sh);
-    g3d_shader_set_mat4(sh, "uLightSpaceMatrix", g_renderer.light_space_matrix);
-
-    int entity_count = 0;
-    int *entities = g3d_scene_impl_get_entities(&entity_count);
-    for (int i = 0; i < entity_count; i++) {
-        G3DEntity *e = g3d_entity_impl_get(entities[i]);
-        if (!e || !e->active || !e->mesh)
-            continue;
-        G3DMesh *m = (G3DMesh *)e->mesh;
-        Mat4 world = g3d_entity_impl_get_world_matrix(entities[i]);
-        g3d_shader_set_mat4(sh, "uModel", world);
-        glBindVertexArray(m->vao);
-        glDrawElements(GL_TRIANGLES, m->index_count, GL_UNSIGNED_INT, 0);
-    }
-    glBindVertexArray(0);
-
-    /* Instanced vegetation/props also cast shadows */
-    g3d_instances_render_depth(g_renderer.light_space_matrix);
-    /* Los sprites tambien proyectan sombra, con su mismo recorte alfa: es lo que
-       hace que un personaje dibujado se apoye de verdad en el suelo. */
-    g3d_sprites_render_depth(g_renderer.light_space_matrix.m);
-
-    glDisable(GL_POLYGON_OFFSET_FILL);
-    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    int W = (int)g_renderer.shadow_map_width, H = (int)g_renderer.shadow_map_height;
+    g_renderer.light_space_matrix = shadow_render_cascade(dir, center, SHADOW_NEAR_EXTENT, 0, 0, W, H);
+    static unsigned int far_n = 0;
+    if ((far_n++ & 1) == 0 || far_n < 4)              /* la lejana, cada 2 fotogramas (y las primeras veces, para que exista) */
+        g_renderer.light_space_matrix2 = shadow_render_cascade(dir, center, SHADOW_FAR_EXTENT, W, 0, W / 2, H / 2);
 #endif
 }
 
@@ -1396,6 +1423,7 @@ void g3d_renderer_set_ssao(int enabled, float radius, float strength) {
 
 uint32_t g3d_renderer_shadow_texture(void) { return g_renderer.shadow_texture; }
 Mat4 g3d_renderer_light_space(void) { return g_renderer.light_space_matrix; }
+Mat4 g3d_renderer_light_space2(void) { return g_renderer.light_space_matrix2; }
 int g3d_renderer_shadows_on(void) { return g_renderer.shadow_enabled; }
 
 /* Render the scene mirrored across the plane (P, N) into the reflection
@@ -2161,6 +2189,8 @@ void g3d_renderer_render_mesh(void *mesh, void *material, Mat4 model_matrix,
         g3d_shader_set_sampler2d(shader, "uShadowMap", 1);
         g3d_shader_set_mat4(shader, "uLightSpaceMatrix",
                             g_renderer.light_space_matrix);
+        g3d_shader_set_mat4(shader, "uLightSpaceMatrix2",
+                            g_renderer.light_space_matrix2);
         g3d_shader_set_int(shader, "uCastShadow", 1);
         glActiveTexture(GL_TEXTURE0);
     } else {

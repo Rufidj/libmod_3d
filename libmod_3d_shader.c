@@ -604,6 +604,7 @@ uniform vec3 uLightDirection;
 uniform vec3 uLightColor;
 uniform float uLightIntensity;
 uniform mat4 uLightSpaceMatrix;
+uniform mat4 uLightSpaceMatrix2;
 uniform int uCastShadow;
 
 // Fog
@@ -673,32 +674,34 @@ float biomeNoise(vec2 p) {
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+// Sombra del sol en dos cascadas dentro de un atlas (ver g3d_renderer_shadow_pass): la cercana ocupa el 2/3 izquierdo del ancho; la
+// lejana, el 1/3 derecho (mitad inferior de alto). Se mezclan en el borde de la cercana y la lejana se desvanece al llegar a su limite.
+float pcfAtlas(vec2 uv, float depth, float bias) {
+    vec2 ts = 1.0 / vec2(textureSize(uShadowMap, 0));
+    float s = 0.0;
+    for (int x = -1; x <= 1; ++x)
+        for (int y = -1; y <= 1; ++y)
+            s += depth - bias > texture(uShadowMap, uv + vec2(x, y) * ts).r ? 1.0 : 0.0;
+    return s / 9.0;
+}
+
 float calculateShadow() {
     if (uCastShadow == 0) return 0.0;
 
-    vec4 fragPosLightSpace = uLightSpaceMatrix * vec4(fs_in.position, 1.0);
-    vec3 projCoords = fragPosLightSpace.xyz / fragPosLightSpace.w;
-    projCoords = projCoords * 0.5 + 0.5;
+    vec4 n4 = uLightSpaceMatrix * vec4(fs_in.position, 1.0);
+    vec3 nc = n4.xyz / n4.w * 0.5 + 0.5;
+    float en = max(abs(nc.x - 0.5), abs(nc.y - 0.5)) * 2.0;        // 0 en el centro de la cascada cercana, 1 en su borde
+    float sN = 0.0;
+    if (en < 0.97 && nc.z <= 1.0) sN = pcfAtlas(vec2(nc.x * (2.0 / 3.0), nc.y), nc.z, 0.005);
+    if (en < 0.80) return sN;
 
-    if (projCoords.z > 1.0) return 0.0;
-
-    float closestDepth = texture(uShadowMap, projCoords.xy).r;
-    float currentDepth = projCoords.z;
-
-    // PCF: Percentage Closer Filtering
-    float shadow = 0.0;
-    vec2 texelSize = 1.0 / textureSize(uShadowMap, 0);
-
-    for (int x = -1; x <= 1; ++x) {
-        for (int y = -1; y <= 1; ++y) {
-            float pcfDepth = texture(uShadowMap,
-                projCoords.xy + vec2(x, y) * texelSize).r;
-            shadow += currentDepth - 0.005 > pcfDepth ? 1.0 : 0.0;
-        }
-    }
-
-    shadow /= 9.0;
-    return shadow;
+    vec4 f4 = uLightSpaceMatrix2 * vec4(fs_in.position, 1.0);
+    vec3 fc = f4.xyz / f4.w * 0.5 + 0.5;
+    float ef = max(abs(fc.x - 0.5), abs(fc.y - 0.5)) * 2.0;
+    float sF = 0.0;
+    if (ef < 0.97 && fc.z <= 1.0) sF = pcfAtlas(vec2(2.0 / 3.0 + fc.x / 3.0, fc.y * 0.5), fc.z, 0.008);
+    sF *= 1.0 - smoothstep(0.78, 0.96, ef);                         // lejos: la sombra se desvanece en vez de aparecer de golpe
+    return mix(sN, sF, smoothstep(0.80, 0.96, en));
 }
 
 float calculateFog() {

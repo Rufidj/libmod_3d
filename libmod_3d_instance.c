@@ -70,21 +70,33 @@ static const char *inst_frag =
     "uniform vec3 uAmbient;\n"
     "uniform sampler2D uShadowMap;\n"
     "uniform mat4 uLightSpace;\n"
+    "uniform mat4 uLightSpace2;\n"
     "uniform int uHasShadow;\n"
     "uniform int uAlphaCut;\n"       /* 1 = alpha-test (foliage); 0 = solid (creatures) */
     "out vec4 FragColor;\n"
-    "float shadowAt() {\n"
-    "    if (uHasShadow == 0) return 0.0;\n"
-    "    vec4 ls = uLightSpace * vec4(vWP, 1.0);\n"
-    "    vec3 p = ls.xyz / ls.w * 0.5 + 0.5;\n"
-    "    if (p.z > 1.0 || p.x < 0.0 || p.x > 1.0 || p.y < 0.0 || p.y > 1.0) return 0.0;\n"
-    "    float cur = p.z;\n"
+    "float pcfA(vec2 uv, float cur, float bias) {\n"
     "    float sh = 0.0;\n"
-    "    vec2 ts = 1.0 / textureSize(uShadowMap, 0);\n"
+    "    vec2 ts = 1.0 / vec2(textureSize(uShadowMap, 0));\n"
     "    for (int x = -1; x <= 1; x++)\n"
     "      for (int y = -1; y <= 1; y++)\n"
-    "        sh += cur - 0.003 > texture(uShadowMap, p.xy + vec2(x,y)*ts).r ? 1.0 : 0.0;\n"
+    "        sh += cur - bias > texture(uShadowMap, uv + vec2(x,y)*ts).r ? 1.0 : 0.0;\n"
     "    return sh / 9.0;\n"
+    "}\n"
+    "float shadowAt() {\n"                       /* dos cascadas en un atlas, como el shader principal */
+    "    if (uHasShadow == 0) return 0.0;\n"
+    "    vec4 l1 = uLightSpace * vec4(vWP, 1.0);\n"
+    "    vec3 n = l1.xyz / l1.w * 0.5 + 0.5;\n"
+    "    float en = max(abs(n.x - 0.5), abs(n.y - 0.5)) * 2.0;\n"
+    "    float sN = 0.0;\n"
+    "    if (en < 0.97 && n.z <= 1.0) sN = pcfA(vec2(n.x * (2.0/3.0), n.y), n.z, 0.003);\n"
+    "    if (en < 0.80) return sN;\n"
+    "    vec4 l2 = uLightSpace2 * vec4(vWP, 1.0);\n"
+    "    vec3 f = l2.xyz / l2.w * 0.5 + 0.5;\n"
+    "    float ef = max(abs(f.x - 0.5), abs(f.y - 0.5)) * 2.0;\n"
+    "    float sF = 0.0;\n"
+    "    if (ef < 0.97 && f.z <= 1.0) sF = pcfA(vec2(2.0/3.0 + f.x / 3.0, f.y * 0.5), f.z, 0.006);\n"
+    "    sF *= 1.0 - smoothstep(0.78, 0.96, ef);\n"
+    "    return mix(sN, sF, smoothstep(0.80, 0.96, en));\n"
     "}\n"
     "void main() {\n"
     "    vec3 albedo = uHasTex == 1 ? texture(uTex, vUV).rgb : vec3(0.4, 0.6, 0.3);\n"
@@ -747,6 +759,7 @@ void g3d_instances_render_all(G3DCamera *camera, int flip_y) {
         if (shadows) {
             g3d_shader_set_int(sp, "uShadowMap", 1);
             g3d_shader_set_mat4(sp, "uLightSpace", lspace);
+            g3d_shader_set_mat4(sp, "uLightSpace2", g3d_renderer_light_space2());
             g3d_shader_set_int(sp, "uHasShadow", 1);
         } else {
             g3d_shader_set_int(sp, "uHasShadow", 0);
